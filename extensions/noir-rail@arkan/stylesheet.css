@@ -1,0 +1,154 @@
+/* Noir Rail — permukaan mengambang di atas desktop. Mengikuti disiplin popup
+   sesi 14/15: hairline terang, tanpa bayangan jatuh, radius 14px sama seperti
+   .popup-menu-content. Aksen rosso hanya muncul saat hover (TIER 0). */
+
+.noir-rail-handle {
+  background-color: rgba(16, 16, 16, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: rgba(242, 242, 242, 0.65);
+  padding: 0;
+  box-shadow: none;
+}
+
+.noir-rail-handle:hover {
+  color: #DA291C;
+  border-color: rgba(218, 41, 28, 0.55);
+  background-color: rgba(16, 16, 16, 0.96);
+}
+
+/* Pemicu yang diselipkan ke kolom ikon dock. Strukturnya ditiru dari dock:
+   tombol seukuran satu langkah ikon (transparan) dengan wajah lingkaran di
+   dalamnya — permukaan dan radius wajah sama seperti .overview-icon tema
+   (radius 20px, hover 10%, active 16% putih) supaya tidak terlihat tempelan. */
+.noir-rail-slot {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+}
+
+.noir-rail-dock {
+  background-color: transparent;
+  border: none;
+  border-radius: 20px;
+  box-shadow: none;
+  padding: 0;
+  color: rgba(242, 242, 242, 0.78);
+  transition-duration: 100ms;
+}
+
+.noir-rail-slot:hover .noir-rail-dock {
+  background-color: rgba(255, 255, 255, 0.10);
+  color: #DA291C;
+}
+
+.noir-rail-slot:active .noir-rail-dock {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+/* rail terbuka: aksen rosso jadi penanda, bukan permukaan penuh */
+.noir-rail-slot.noir-rail-on .noir-rail-dock {
+  background-color: rgba(218, 41, 28, 0.18);
+  color: #DA291C;
+}
+
+/* mode mengambang (dock tidak ada): pil kecil di pinggir area kerja */
+.noir-rail-handle.noir-rail-on {
+  color: #DA291C;
+  border-color: rgba(218, 41, 28, 0.55);
+}
+
+.noir-rail-panel {
+  background-color: rgba(16, 16, 16, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+  box-shadow: none;
+}
+
+.noir-rail-section {
+  color: rgba(242, 242, 242, 0.38);
+  font-size: 10px;
+  font-weight: 700;
+  padding-left: 4px;
+}
+
+.noir-rail-sep {
+  background-color: rgba(255, 255, 255, 0.07);
+  margin: 8px 4px;
+}
+
+.noir-rail-row {
+  border: none;
+  border-radius: 9px;
+  padding: 0 6px;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.noir-rail-row:hover,
+.noir-rail-row:focus {
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.noir-rail-row:active {
+  background-color: rgba(218, 41, 28, 0.22);
+}
+
+.noir-rail-row-label {
+  color: rgba(242, 242, 242, 0.92);
+  font-size: 13px;
+}
+
+.noir-rail-row-cmd {
+  color: rgba(242, 242, 242, 0.86);
+  font-size: 12px;
+  font-family: "DejaVu Sans Mono", monospace;
+}
+
+.noir-rail-row-hint {
+  color: rgba(242, 242, 242, 0.34);
+  font-size: 11px;
+  font-family: "Titillium Web";
+}
+
+/* tombol terminal kecil di ekor baris folder */
+.noir-rail-mini {
+  border: none;
+  border-radius: 6px;
+  padding: 2px 4px;
+  background-color: transparent;
+  box-shadow: none;
+  color: rgba(242, 242, 242, 0.30);
+}
+
+.noir-rail-mini:hover {
+  color: #DA291C;
+  background-color: rgba(255, 255, 255, 0.09);
+}
+
+/* Baterai kritis: kelas noir-batt-critical dipasang extension.js dari ambang
+   UPower. Shell 46 tidak punya pseudo-class state baterai (yang berubah cuma
+   icon_name), jadi warnanya lewat kelas ini. Indikator baterai bukan
+   .panel-button — kelas aslinya .power-status.panel-status-indicators-box,
+   dan warna putihnya sekarang diwarisi dari tombol QS di atasnya, jadi
+   descendants ikut ditulis. */
+#panel .power-status.noir-batt-critical,
+#panel .power-status.noir-batt-critical .system-status-icon,
+#panel .power-status.noir-batt-critical StLabel {
+  color: #DA291C !important;
+}
+
+/* TIER 21: baris "Battery Level" di dalam Quick Settings ikut rosso saat daya
+   kritis. Actor ini bukan anak #panel - ia BoxPointer yang duduk di stage
+   (popupMenu.js:873) - jadi selector tanpa prefiks #panel. Ikonnya bernama
+   .quick-toggle-icon (quickSettings.js), StIcon ikut ditulis supaya warna tetap
+   kena kalau upstream mengganti nama kelasnya. */
+.power-item.noir-batt-critical,
+.power-item.noir-batt-critical StLabel,
+.power-item.noir-batt-critical .quick-toggle-icon,
+.power-item.noir-batt-critical StIcon {
+  color: #DA291C !important;
+}

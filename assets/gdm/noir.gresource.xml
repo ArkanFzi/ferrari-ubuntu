@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/">
+    <file>org/gnome/shell/theme/Yaru-dark/gnome-shell.css</file>
+    <file>org/gnome/shell/theme/Yaru/gnome-shell-dark.css</file>
+    <file>org/gnome/shell/theme/Yaru/gnome-shell.css</file>
+    <file>org/gnome/shell/theme/background.png</file>
+    <file>org/gnome/shell/theme/calendar-today-light.svg</file>
+    <file>org/gnome/shell/theme/calendar-today.svg</file>
+    <file>org/gnome/shell/theme/gdm.css</file>
+    <file>org/gnome/shell/theme/gdm3.css</file>
+    <file>org/gnome/shell/theme/gnome-shell-dark.css</file>
+    <file>org/gnome/shell/theme/gnome-shell-high-contrast.css</file>
+    <file>org/gnome/shell/theme/gnome-shell-light.css</file>
+    <file>org/gnome/shell/theme/gnome-shell-start.svg</file>
+    <file>org/gnome/shell/theme/pad-osd.css</file>
+    <file>org/gnome/shell/theme/process-working-dark.svg</file>
+    <file>org/gnome/shell/theme/process-working-light.svg</file>
+    <file>org/gnome/shell/theme/workspace-placeholder.svg</file>
+  </gresource>
+</gresources>

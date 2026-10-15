@@ -1,0 +1,34 @@
+Aset pihak ketiga yang dipakai desain ini
+=========================================
+
+Repo ini TIDAK mengirim ulang paket ikon atau tema besar. Yang ada di repo
+hanya karya sendiri plus dua berkas hasil turunan, dengan catatan:
+
+1. assets/gdm/gnome-shell-theme.gresource
+   Turunan dari Yaru GNOME Shell theme (Ubuntu). CSS bawaan Yaru memakai
+   header LGPL-2.1 (lihat bagian kepala gnome-shell.css). Kami mengubah CSS
+   untuk layar login (pita tricolore, permukaan noir). Sumber asli:
+   paket `yaru-theme-gnome-shell` di Ubuntu. Versi pristine bisa dipulihkan
+   dengan `sudo apt reinstall yaru-theme-gnome-shell`.
+
+2. theme/overrides/gnome-shell/gnome-shell.css
+   Berkas generated dari WhiteSur GTK theme (vinceliuice) varian Dark +
+   accent orange, yang lalu kami tambahi aksen Rosso Corsa #da291c dan
+   penyesuaian panel/dock. Unduh upstream:
+   https://github.com/vinceliuice/WhiteSur-gtk-theme
+
+3. Dependency yang diunduh terpisah (lihat scripts/fetch-deps.sh):
+   - WhiteSur GTK theme        https://github.com/vinceliuice/WhiteSur-gtk-theme
+   - Mkos-Big-Sur icon theme   https://www.gnome-look.org/p/1400021
+   - DMZ cursor theme          paket Ubuntu `dmz-cursor-theme`
+   - Font Inter                https://rsms.me/inter/ (SIL OFL)
+   - Font Titillium Web        https://fonts.google.com/specimen/Titillium+Web (SIL OFL)
+   - Font Hack                 paket Ubuntu `fonts-hack` (SIL OFL)
+   - Extension: Blur my Shell, Just Perfection, Compiz-alike magic lamp,
+     User theme, Desktop iconsNG (ding) — dari https://extensions.gnome.org
+
+Wallpaper yang bukan buatan kami (foto pembalap/brand berwatermark) sengaja
+tidak dimasukkan; hanya hasil render sendiri yang ikut.
+
+Ferrari, Scuderia, Scudetto, dan Rosso Corsa adalah merek dagang pihak lain.
+Aset di repo ini karya sendiri yang terinspirasi, tidak berafiliasi.

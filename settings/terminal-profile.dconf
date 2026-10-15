@@ -1,0 +1,14 @@
+# Palet terminal noir-rosso. Diterapkan ke profil default GNOME Terminal
+# (UUID profil dicari/dibuat saat instalasi, jadi file ini tidak memuat UUID).
+background-color '#242424'
+foreground-color '#dedede'
+bold-color '#ffffff'
+bold-color-same-as-fg false
+cursor-background-color '#da291c'
+cursor-foreground-color '#ffffff'
+cursor-colors-set true
+highlight-background-color '#da291c'
+highlight-foreground-color '#ffffff'
+highlight-colors-set true
+use-theme-colors false
+palette ['#1c1c1c', '#da291c', '#008c45', '#ffed00', '#688fb0', '#b96a5f', '#4f8a72', '#dedede', '#707070', '#f04438', '#35c877', '#fff35c', '#7fa0c0', '#d08a80', '#6fbf9a', '#ffffff']

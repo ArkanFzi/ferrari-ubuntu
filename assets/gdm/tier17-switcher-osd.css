@@ -1,0 +1,101 @@
+/* ===== TIER 17 (sesi 18) - KARTU NOIR UNTUK ALT-TAB, OSD & HUD ================
+   Yaru memberi grup OSD (.workspace-switcher / .switcher-list / .resize-popup /
+   .osd-window) warna #2e2e33 dengan border-radius 999px, jadi HUD terasa seperti
+   pil abu-abu, bukan kartu noir yang sudah dipakai popup & dialog (blok sesi 10).
+   Blok ini menyamakan permukaan dan memberi SATU tanda rosso (#da291c, TIER 0)
+   pada state terpilih. Aturan tema asli ada lebih dulu di file ini, jadi tanpa
+   !important pun menang lewat urutan sumber; !important hanya dipakai pada
+   box-shadow yang di Yaru memang ditulis !important.
+   Pseudo-class Alt-Tab terverifikasi di switcherPopup.js:491-499 ('selected' dan
+   'highlighted'), bukan ':focus'.
+   REVERT: hapus blok TIER 17 ini lalu bangun ulang gresource. */
+
+/* A1 - permukaan kartu noir (sama dengan .modal-dialog / .popup-menu-content) */
+.switcher-list,
+.workspace-switcher,
+.osd-window,
+.resize-popup {
+  background-color: rgba(8, 8, 9, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 22px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55) !important;
+  padding: 14px;
+}
+
+/* A2 - Alt-Tab: satu kartu per jendela, yang aktif = kaca tipis + garis rosso */
+.switcher-list .item-box {
+  border-radius: 14px;
+  padding: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  background-color: transparent;
+  border: 1px solid transparent;
+}
+
+.switcher-list .item-box:hover {
+  color: rgba(255, 255, 255, 0.88);
+  background-color: transparent;
+}
+
+.switcher-list .item-box:highlighted,
+.switcher-list .item-box:selected,
+.switcher-list .item-box:checked {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(218, 41, 28, 0.55);
+}
+
+/* A3 - judul app di atas Alt-Tab jangan lebih terik dari isi kartu */
+.alt-tab-app {
+  spacing: 6px;
+}
+
+.alt-tab-app StLabel {
+  color: rgba(255, 255, 255, 0.85);
+  text-align: center;
+}
+
+/* A4 - thumbnail sedikit lebih kalem, sudut ikut radius kartu */
+.switcher-list .thumbnail-box {
+  padding: 3px;
+  spacing: 8px;
+}
+
+.switcher-list .thumbnail {
+  border-radius: 10px;
+}
+
+/* A5 - OSD workspace: titik putih redup, titik aktif rosso */
+.ws-switcher-indicator {
+  background-color: rgba(255, 255, 255, 0.26);
+}
+
+.ws-switcher-indicator:active {
+  background-color: #da291c;
+}
+
+/* A6 - HUD volume/kecerahan: bar putih gading, overdrive rosso */
+.osd-window {
+  font-weight: 600;
+}
+
+.osd-window .level {
+  -barlevel-background-color: rgba(255, 255, 255, 0.12);
+  -barlevel-active-background-color: rgba(255, 255, 255, 0.92);
+  -barlevel-overdrive-color: #da291c;
+  -barlevel-overdrive-separator-width: 2px;
+}
+
+/* A7 - label kecerahan/monitor: aslinya kotak putih #ffffff dengan teks hitam,
+   paling menerangi layar di antara semua HUD. Jadi kartu gelap. */
+.osd-monitor-label,
+.osd-break-countdown-label {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-weight: 300;
+}
+
+/* A8 - Alt+` (cycler window dalam satu app): bingkai putih 5px -> garis rosso */
+.cycler-highlight {
+  border: 3px solid rgba(218, 41, 28, 0.9);
+}

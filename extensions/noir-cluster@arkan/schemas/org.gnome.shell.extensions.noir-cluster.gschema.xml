@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.noir-cluster"
+          path="/org/gnome/shell/extensions/noir-cluster/">
+    <key name="cycle-mode" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;m']</default>
+      <summary>Putar mode berkendara</summary>
+      <description>Gerbang kunci untuk berpindah WET -&gt; SPORT -&gt; RACE.</description>
+    </key>
+    <key name="rev-lights" type="b">
+      <default>true</default>
+      <summary>Rev-light cluster</summary>
+      <description>Matikan kalau strip lampu di bawah panel terasa mengganggu.</description>
+    </key>
+    <key name="livery" type="b">
+      <default>true</default>
+      <summary>Wallpaper livery per mode</summary>
+      <description>RACE diberi sapuan rosso, WET dipudar dan digelapkan, SPORT memakai wallpaper asal.</description>
+    </key>
+    <key name="launch-stats" type="b">
+      <default>true</default>
+      <summary>Pit-lane launch timer</summary>
+      <description>Catut waktu buka aplikasi dan tampilkan di bawah cluster.</description>
+    </key>
+    <key name="team-radio" type="b">
+      <default>true</default>
+      <summary>Team radio</summary>
+      <description>Panggilan radio saat kabel masuk, kabel lepas, baterai tinggal 20%, dan pengisian penuh.</description>
+    </key>
+  </schema>
+</schemalist>

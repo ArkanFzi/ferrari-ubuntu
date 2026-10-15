@@ -1,0 +1,58 @@
+<!-- Wallpaper dinamis scudetto tiga fasa.
+     Pita tricolore mengikuti lengkung puncak perisai (hijau-putih-merah), lapangan giallo,
+     cavallino + S F hitam, wordmark putih. Malam = hitam putih penuh seperti wallpaper asal.
+     sore = titik tengah silang siang<->malam, dipakai sebagai jeda agar transisi terasa bertahap.
+     Siklus 86400 s yang berlabuh ke tengah malam (starttime 2009-08-04 00:00:00 + n*86400).
+     00:00-05:00 malam | 05:00-05:30 ke sore | 05:30-06:00 sore | 06:00-06:30 ke siang |
+     06:30-17:30 siang | 17:30-18:00 ke sore | 18:00-18:30 sore | 18:30-19:00 ke malam |
+     19:00-24:00 malam. Total 18000+1800+1800+1800+39600+1800+1800+1800+18000 = 86400. -->
+<background>
+  <starttime>
+    <year>2009</year>
+    <month>08</month>
+    <day>04</day>
+    <hour>00</hour>
+    <minute>00</minute>
+    <second>00</second>
+  </starttime>
+  <static>
+    <duration>18000.0</duration>
+    <file>__HOME__/.local/share/backgrounds/ferrari-scudetto-malam.png</file>
+  </static>
+  <transition>
+    <duration>1800.0</duration>
+    <from>__HOME__/.local/share/backgrounds/ferrari-scudetto-malam.png</from>
+    <to>__HOME__/.local/share/backgrounds/ferrari-scudetto-sore.png</to>
+  </transition>
+  <static>
+    <duration>1800.0</duration>
+    <file>__HOME__/.local/share/backgrounds/ferrari-scudetto-sore.png</file>
+  </static>
+  <transition>
+    <duration>1800.0</duration>
+    <from>__HOME__/.local/share/backgrounds/ferrari-scudetto-sore.png</from>
+    <to>__HOME__/.local/share/backgrounds/ferrari-scudetto-siang.png</to>
+  </transition>
+  <static>
+    <duration>39600.0</duration>
+    <file>__HOME__/.local/share/backgrounds/ferrari-scudetto-siang.png</file>
+  </static>
+  <transition>
+    <duration>1800.0</duration>
+    <from>__HOME__/.local/share/backgrounds/ferrari-scudetto-siang.png</from>
+    <to>__HOME__/.local/share/backgrounds/ferrari-scudetto-sore.png</to>
+  </transition>
+  <static>
+    <duration>1800.0</duration>
+    <file>__HOME__/.local/share/backgrounds/ferrari-scudetto-sore.png</file>
+  </static>
+  <transition>
+    <duration>1800.0</duration>
+    <from>__HOME__/.local/share/backgrounds/ferrari-scudetto-sore.png</from>
+    <to>__HOME__/.local/share/backgrounds/ferrari-scudetto-malam.png</to>
+  </transition>
+  <static>
+    <duration>18000.0</duration>
+    <file>__HOME__/.local/share/backgrounds/ferrari-scudetto-malam.png</file>
+  </static>
+</background>

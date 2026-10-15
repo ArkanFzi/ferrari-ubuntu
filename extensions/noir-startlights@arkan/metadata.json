@@ -1,0 +1,13 @@
+{
+  "uuid": "noir-startlights@arkan",
+  "name": "Noir Start Lights",
+  "description": "Start-light gantry lima lampu saat sesi dimulai.",
+  "shell-version": [
+    "46"
+  ],
+  "version": 1,
+  "session-modes": [
+    "user",
+    "unlock-dialog"
+  ]
+}

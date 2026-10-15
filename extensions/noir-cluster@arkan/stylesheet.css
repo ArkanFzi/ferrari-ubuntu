@@ -1,0 +1,73 @@
+/* noir-cluster@arkan — chip mode berkendara + rev-light cluster.
+   Palet: graphite senyap untuk state diam, Rosso Corsa #da291c hanya untuk
+   yang benar-benar berarti (titik pindah gigi dan mode RACE). */
+
+.noir-cluster-chip {
+  font-family: Titillium Web;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  spacing: 7px;
+}
+
+.noir-cluster-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 3px;
+  background-color: #6d6d6d;
+}
+
+.noir-cluster--wet .noir-cluster-dot {
+  background-color: #8f8f8f;
+}
+
+.noir-cluster--sport .noir-cluster-dot {
+  background-color: #e8e8e8;
+}
+
+.noir-cluster--race .noir-cluster-dot {
+  background-color: #da291c;
+}
+
+.noir-cluster--active {
+  color: #da291c;
+}
+
+.noir-cluster-led {
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.noir-cluster-led--lit {
+  background-color: rgba(232, 232, 232, 0.9);
+}
+
+.noir-cluster-led--rosso.noir-cluster-led--lit {
+  background-color: #da291c;
+}
+
+/* Gigi dan kecepatan. min-width menahan lebar label tetap sama saat angka
+   berganti (1 digit vs 3 digit); di panel, lebar yang berubah akan mendorong
+   indikator lain. */
+.noir-cluster-num {
+  font-family: Titillium Web;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(232, 232, 232, 0.5);
+  min-width: 26px;
+  text-align: center;
+}
+
+.noir-cluster-num--gear {
+  min-width: 12px;
+  color: #da291c;
+}
+
+/* Papan pit-lane: label pendek di dalam panel, bukan kartu di atas kanvas. */
+.noir-cluster-caption {
+  font-family: Titillium Web;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: rgba(232, 232, 232, 0.68);
+}

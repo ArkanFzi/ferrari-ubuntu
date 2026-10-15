@@ -1,0 +1,65 @@
+/* ===== TIER 17b (sesi 18) - ALT-TAB & HUD JADI KARTU NOIR ======================
+   Gejala: tiap Alt-Tab memunculkan SATU BALOK MERAH penuh. Penyebabnya bukan blok
+   TIER 17 di gresource, tapi aturan asli tema ini di baris ~3264:
+     .switcher-list .item-box:selected { background-color: #DA291C }
+   yang diberi warna rosso saat TIER 1 (sesi 16). Rosso #da291c adalah jatah TIER 0
+   untuk garis/hairline dan indikator kecil, bukan untuk permukaan sebesar kartu.
+   Permukaan HUD-nya sendiri masih abu-abu #242424 (baris ~2404), beda dari kartu
+   noir popup/dialog (rgba(8,8,9,...)).
+   Aturan di bawah menimpa itu semua; tema ini dimuat user-theme extension SESUDAH
+   gresource, jadi blok TIER 17 di gresource tetap berguna untuk property yang tidak
+   disentuh tema ini (.osd-monitor-label, .ws-switcher-indicator, :highlighted).
+   Backup: backup lokal sebelum T17b
+   REVERT: hapus blok TIER 17b ini (dari marker di atas sampai akhir file). */
+
+/* B1 - permukaan HUD: noir, radius sama dengan popup (22), shadow dalam */
+.workspace-switcher-container,
+.switcher-list,
+.resize-popup,
+.osd-window {
+  background-color: rgba(8, 8, 9, 0.9);
+  border-radius: 22px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55) !important;
+  padding: 14px;
+}
+
+/* B2 - item Alt-Tab aktif: kaca putih tipis + hairline rosso 1px.
+   Border dasar .item-box sudah 1px transparent, jadi tidak ada lompatan layout. */
+.switcher-list .item-box:selected,
+.switcher-list .item-box:highlighted,
+.switcher-list .item-box:checked {
+  background-color: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(218, 41, 28, 0.55);
+  color: #ffffff;
+}
+
+/* B3 - judul app di atas kartu jangan lebih terik dari isinya */
+.alt-tab-app StLabel {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* B4 - cycler window (Alt+`): bingkai rosso 5px -> hairline 2px */
+.cycler-highlight {
+  border: 2px solid rgba(218, 41, 28, 0.9);
+}
+
+/* B5 - HUD volume/kecerahan: bar tetap rosso (indikator kecil, sesuai aturan TIER 0),
+   tapi label kecerahan tidak boleh lagi jadi kotak putih sebesar kartu. */
+.osd-window .osd-monitor-label,
+.osd-monitor-label,
+.osd-break-countdown-label {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-weight: 300;
+}
+
+/* B6 - indikator workspace versi GNOME 46 (.ws-switcher-indicator); tema ini hanya
+   mengenal .ws-switcher-box dari GNOME lama, jadi yang aktif ditulis di sini. */
+.ws-switcher-indicator {
+  background-color: rgba(255, 255, 255, 0.26);
+}
+
+.ws-switcher-indicator:active {
+  background-color: #da291c;
+}

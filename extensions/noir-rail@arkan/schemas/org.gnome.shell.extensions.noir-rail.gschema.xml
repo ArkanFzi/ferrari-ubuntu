@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.noir-rail"
+          path="/org/gnome/shell/extensions/noir-rail/">
+    <key name="toggle-rail" type="as">
+      <default>['&lt;Super&gt;r']</default>
+      <summary>Pemicu Noir Rail</summary>
+      <description>Gerbang kunci untuk membuka/menutup rail di sisi dock.</description>
+    </key>
+  </schema>
+</schemalist>

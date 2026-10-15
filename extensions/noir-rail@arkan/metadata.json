@@ -1,0 +1,10 @@
+{
+  "uuid": "noir-rail@arkan",
+  "name": "Noir Rail",
+  "description": "Sub panel di sisi dock: aplikasi terkini, folder tersering, dan terminal cepat — diperingkat dari perilaku nyata.",
+  "settings-schema": "org.gnome.shell.extensions.noir-rail",
+  "shell-version": [
+    "46"
+  ],
+  "version": 2
+}

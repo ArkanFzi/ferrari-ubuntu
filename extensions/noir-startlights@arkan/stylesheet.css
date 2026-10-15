@@ -1,0 +1,12 @@
+/* noir-startlights — balance start di awal sesi. */
+.noir-gantry-light {
+  border-radius: 17px;
+  background-color: #241313;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.noir-gantry-light.noir-gantry-light--on {
+  background-color: #da291c;
+  border-color: rgba(218, 41, 28, 0.9);
+  box-shadow: 0 0 14px 3px rgba(218, 41, 28, 0.45);
+}

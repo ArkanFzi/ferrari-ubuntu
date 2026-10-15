@@ -1,0 +1,10 @@
+{
+  "uuid": "noir-cluster@arkan",
+  "name": "Noir Cluster",
+  "description": "Cluster pengemudi di panel: mode WET/SPORT/RACE yang benar-benar mengganti power profile, plus rev-light sepuluh segmen mengikuti beban CPU.",
+  "settings-schema": "org.gnome.shell.extensions.noir-cluster",
+  "shell-version": [
+    "46"
+  ],
+  "version": 1
+}

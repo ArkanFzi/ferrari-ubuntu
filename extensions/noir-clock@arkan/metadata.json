@@ -1,0 +1,9 @@
+{
+  "uuid": "noir-clock@arkan",
+  "name": "Noir Analog Clock",
+  "description": "Jam analog di layer desktop: wajah noir, jarum detik Rosso Corsa, redline 5 detik terakhir. Setelah dua menit tanpa input ia jadi layar ambient — tidak naik selama media berjalan, ada inhibitor sesi, atau jendela fullscreen.",
+  "shell-version": [
+    "46"
+  ],
+  "version": 3
+}
