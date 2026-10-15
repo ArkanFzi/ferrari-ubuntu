@@ -67,11 +67,17 @@ const DBUS_TIMEOUT_MS = 100;
 // presentasi, SSH session) adalah sinyal paling kuat bahwa layar tidak boleh
 // ditutup. Cookie milik noir-clock sendiri disingkirkan dari perhitungan, kalau
 // tidak fitur ini jadi mengunci dirinya sendiri.
+//
+// Angkanya enum D-Bus, bukan urutan bebas: logout 1, switch-user 2, suspend 4,
+// idle 8. Salah nilai membuat Inhibit(3) ternyata menahan logout+switch-user
+// sementara yang kita mau suspend+idle — dan rem di bawah jadi membaca bit yang
+// salah. Nilai ini diverifikasi dengan mengukur delta InhibitedActions per
+// panggilan gnome-session-inhibit.
 const SESSION_BUS = 'org.gnome.SessionManager';
 const SESSION_PATH = '/org/gnome/SessionManager';
 const SESSION_IFACE = 'org.gnome.SessionManager';
-const INHIBIT_SUSPEND = 1;
-const INHIBIT_IDLE = 2;
+const INHIBIT_SUSPEND = 4;
+const INHIBIT_IDLE = 8;
 const APP_ID = 'noir-clock@arkan';
 const INHIBIT_REASON = 'noir-clock: pemutaran media';
 
@@ -375,9 +381,15 @@ export default class NoirClockExtension extends Extension {
   // Cookie noir-clock sendiri ikut masuk bitmask ini. Tanpa dikeluarkan, begitu
   // kita memegang inhibitor veil tidak akan pernah naik lagi — fitur mengunci
   // dirinya sendiri.
+  //
+  // Hanya bit suspend+idle yang dihitung sebagai aktivitas. Sesi yang sehat selalu
+  // memegang inhibitor lain juga — di sesi ini bitmask dasarnya 10 (switch-user
+  // dari noir-cluster, idle dari ubuntu-release-upgrader) — jadi menghitung semua
+  // bit asing membuat ambient tidak bisa naik selamanya.
   _sessionInhibited() {
     const own = this._inhibitCookie ? INHIBIT_SUSPEND | INHIBIT_IDLE : 0;
-    return (this._inhibitedActions() & ~own) !== 0;
+    const foreign = this._inhibitedActions() & ~own;
+    return (foreign & (INHIBIT_SUSPEND | INHIBIT_IDLE)) !== 0;
   }
 
   _mprisPlaying() {

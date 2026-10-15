@@ -29,7 +29,7 @@ const UP_DEV_IFACE = 'org.freedesktop.UPower.Device';
 const SESSION_NAME = 'org.gnome.SessionManager';
 const SESSION_PATH = '/org/gnome/SessionManager';
 const PROPS_IFACE = 'org.freedesktop.DBus.Properties';
-const INHIBIT_IDLE = 2;
+const INHIBIT_IDLE = 8;
 const INHIBIT_REASON = 'noir-cluster: mode RACE';
 const DBUS_TIMEOUT_MS = 200;
 
