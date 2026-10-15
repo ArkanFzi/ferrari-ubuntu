@@ -65,8 +65,17 @@ form login. Yang bisa diubah di sana hanyalah **tema** (gresource GDM).
 ## 8. Laptop tertidur saat nonton video
 
 `idle-delay 0` mematikan idle detector, dan noir-clock memegang inhibitor
-suspend selama media Playing. Kalau masih tertidur, cek inhibitor masih dipegang
-(`systemd-inhibit --list | grep -i noir`).
+suspend selama media Playing. Kalau masih tertidur, cek inhibitor masih
+dipegang:
+
+```bash
+gnome-session-inhibit -l          # harus ada "noir-clock@arkan ... (suspend, idle)"
+```
+
+`systemd-inhibit --list` tidak membantu di sini — inhibitor gnome-session hidup
+di bus sesi dan tidak muncul di sana (terukur: daftarnya kosong untuk noir).
+Cara cepat lain: lihat chip PIT (noir-telemetry, lihat #14) — selama nyala karena
+media, noir-clock memegang suspend.
 
 ## 9. Gesture touchpad hilang
 
