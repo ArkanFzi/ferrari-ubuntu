@@ -57,3 +57,6 @@ lain yang nilai aslinya tidak dia kenal.
     di sana memuat nama aplikasi, path folder, dan SSID kamu. Sensor label jaringan
     dan isi riwayat sebelum masuk `docs/gambar/`; `sanitize-check.sh` ikut memindai
     isi PNG, tapi ia tidak bisa membaca piksel, jadi sensor tetap tugas manusia.
+16. Tooltip chip PIT dan baris log `noir-telemetry:` menyebut **nama** pemutar
+    MPRIS dan pemegang inhibitor (contoh: `chromium.instance931218`,
+    `spotify`). Kalau screenshot memperlihatkan tooltip itu, sensor namanya juga.

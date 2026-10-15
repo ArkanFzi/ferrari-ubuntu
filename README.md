@@ -27,7 +27,8 @@ Xephyr melapor hitung-mundur, sehingga veil tidak pernah naik di rig.
 ferrari-ubuntu/
 ├── README.md                  dokumen ini
 ├── LICENSE  NOTICE            lisensi karya sendiri + kredit pihak ketiga
-├── extensions/                noir-cluster, noir-rail, noir-clock, noir-startlights
+├── extensions/                noir-cluster, noir-rail, noir-clock, noir-startlights,
+│                              noir-telemetry
 ├── assets/
 │   ├── wallpapers/            hasil render sendiri + XML dinamis 3 fasa
 │   ├── sounds/                panggilan radio (.oga) + gen-radio.py
@@ -110,12 +111,13 @@ initramfs — karena itu script ini selalu bertanya, tidak pernah auto-sudo.
 ### 5. Verifikasi
 
 ```bash
-gnome-extensions list --enabled | grep noir          # 4 extension muncul
+gnome-extensions list --enabled | grep noir          # 5 extension muncul
 gsettings get org.gnome.desktop.interface font-name  # 'Inter 10'
 gsettings get org.gnome.desktop.interface gtk-theme  # 'WhiteSur-Dark-orange'
 plymouth-set-default-theme                           # noir-rosso (jika langkah 4 dijalankan)
 bash scripts/install.sh --check                      # semua "ada"
 bash scripts/apply-settings.sh --check               # "semua setelan sudah cocok"
+gnome-session-inhibit -l                             # entri suspend/idle menyalakan chip PIT
 ```
 
 Uji suara radio tanpa mencabut kabel:
@@ -131,7 +133,10 @@ wpctl status | grep -A2 canberra                    # stream [active]
 
 - **Panel**: tinggi 26 px, ikon tersembunyi rapi, cluster F1 di kanan (gear +
   10 LED rev + kecepatan) yang hanya muncul saat mesin sibuk; papan pit-lane
-  menampilkan waktu buka aplikasi di slot yang sama.
+  menampilkan waktu buka aplikasi di slot yang sama. Chip `PIT` (noir-telemetry)
+  menyala di kanan selama ada pemutar media berstatus Playing atau ada pihak
+  lain menahan suspend/idle sesi — persis kondisi yang membuat layar ambient
+  noir-clock tidak boleh naik.
 - **Dock**: kiri, full-height, fixed, ikon 48 px, indikator `DASHES`, dasar
   `#121212` dengan blur; mount + trash tampil sebagai seksi pemisah.
 - **Tipografi**: Inter 10 untuk UI, Titillium Web untuk angka (cluster, jam),

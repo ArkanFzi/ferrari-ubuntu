@@ -40,6 +40,7 @@ EXT_ALLOW = [
     'user-theme', 'just-perfection', 'blur-my-shell', 'dash-to-dock',
     'appindicator', 'ding', 'compiz-alike-magic-lamp-effect', 'x11gestures',
     'noir-rail', 'noir-clock', 'noir-cluster', 'noir-startlights',
+    'noir-telemetry',
 ]
 
 # Kunci berisi kondisi runtime mesin, bukan desain UI.

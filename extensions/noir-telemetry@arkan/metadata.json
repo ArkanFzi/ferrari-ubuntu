@@ -1,0 +1,9 @@
+{
+  "uuid": "noir-telemetry@arkan",
+  "name": "Noir Telemetry",
+  "description": "Chip PIT di panel: menyala selama pemutar media berjalan atau ada pihak lain menahan suspend/idle sesi.",
+  "shell-version": [
+    "46"
+  ],
+  "version": 1
+}

@@ -57,6 +57,31 @@ Panel tetap datang tanpa kaca supaya tinggi 26 px konsisten.
   baterai 20 %, pengisian penuh). Cluster dan papan pesan occupies **slot yang
   sama** di panel supaya indikator tidak bergeser saat pesan muncul.
 
+## TIER 25 — chip PIT
+
+`noir-telemetry@arkan` menjawab satu pertanyaan yang selama ini cuma bisa
+dicek lewat terminal: "kenapa layar tidak mati / kenapa ambient tidak naik?".
+Satu chip rosso berlabel `PIT` menyala selama salah satu dari dua sinyal publik
+terpenuhi:
+
+- ada nama `org.mpris.MediaPlayer2.*` dengan `PlaybackStatus` = `Playing`;
+- `InhibitedActions` gnome-session punya bit suspend (4) atau idle (8).
+
+Dua keputusan yang bikin chip ini bisa dipercaya:
+
+- **Angka flag diukur, bukan ditebak.** Enum D-Bus gnome-session adalah
+  logout 1, switch-user 2, suspend 4, idle 8 — bukan urutan bebas. Delta
+  `InhibitedActions` diukur per panggilan `gnome-session-inhibit` untuk
+  memastikan. Bit selain suspend/idle selalu menyala di sesi sehat (dasar
+  sesi ini 10), jadi kalau semuanya dihitung, chip tidak pernah mati.
+- **Hanya sinyal publik.** Tidak ada state shell privat yang dibaca, jadi chip
+  tidak ikut pecah saat gnome-shell naik versi. Status area menerima actor
+  biasa? Tidak — `addToStatusArea` menolak selain `PanelMenu.Button` (terukur),
+  jadi chip dibungkus Button dengan `reactive = false` supaya tidak ada popup
+  kosong saat diklik.
+
+Chip tidak memegang inhibitor sendiri: dia hanya pembaca.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di

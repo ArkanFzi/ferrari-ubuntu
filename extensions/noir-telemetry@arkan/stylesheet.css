@@ -1,0 +1,24 @@
+/* noir-telemetry@arkan — chip PIT.
+   Rosso Corsa #da291c dipakai untuk satu keadaan saja: sesi sedang ditahan,
+   jadi laptop tidak boleh dianggap diam. Saat normal chip tidak terlihat sama
+   sekali, sehingga panel tidak bertambah ramai. */
+
+.noir-pit {
+  font-family: Titillium Web;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  spacing: 7px;
+  padding: 2px 8px;
+  border: 1px solid rgba(218, 41, 28, 0.40);
+  border-radius: 8px;
+  background-color: rgba(218, 41, 28, 0.10);
+  color: #da291c;
+}
+
+.noir-pit-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: #da291c;
+}

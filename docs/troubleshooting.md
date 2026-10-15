@@ -118,3 +118,39 @@ direktori `schemas/` yang baru muncul tidak ikut terbaca. Logout/login.
 Untuk uji tata letak dipakai Xephyr (:9) dengan shell sendiri, sehingga sesi
 live tidak ikut menerima input sintetis. Screenshot di Xephyr butuh gerakan
 mouse terus-menerus (pixmap root basi tanpa input) dan `ffmpeg -f x11grab`.
+Di build ini `Xephyr -resize` tidak dikenal — ukuran ditentukan `-screen`, lalu
+dibetulkan dengan `xrandr --output default --mode ...` sebelum direkam, kalau
+tidak `ffmpeg` gagal dengan "Error opening input: Invalid argument".
+
+## 14. Chip PIT: cara membaca dan kalau tidak muncul
+
+`noir-telemetry@arkan` hanya membaca, tidak menahan apa pun. Nyala berarti salah
+satu dari ini benar:
+
+```bash
+busctl --user list | grep mpris                    # player dengan PlaybackStatus Playing
+gnome-session-inhibit -l                           # siapa pemegang suspend/idle
+gdbus call --session --dest org.gnome.SessionManager \
+  --object-path /org/gnome/SessionManager \
+  --method org.freedesktop.DBus.Properties.Get \
+  org.gnome.SessionManager InhibitedActions        # bitmask; chip hanya cek bit 4 dan 8
+```
+
+Bit 8 (idle) bisa menyala tanpa ada video berjalan, dan pemegangnya tidak
+selalu terlihat dari mata — di mesin ini `mutter: idle-inhibit` dan
+`ubuntu-release-upgrader` ikut menahan idle. Jadi PIT nyala bukan tanda ada
+yang rusak: artinya "layar memang sengaja ditahan", dan
+`gnome-session-inhibit -l` yang menunjuk pelakunya.
+
+Chip tidak muncul sama sekali padahal ada media berjalan: JS baru terbaca saat
+shell mulai (lihat #1), dan log-nya bicara sendiri:
+
+```bash
+journalctl /usr/bin/gnome-shell -b | grep noir-telemetry
+```
+
+Baris `noir-telemetry: aktif, state awal PIT mati` berarti ekstensi hidup tapi
+tidak ada penahan; tidak ada baris sama sekali berarti ekstensi tidak termuat.
+Catatan untuk rig: `org.gnome.SessionManager` tidak ada di bus privat
+`dbus-run-session` (`ServiceUnknown`), jadi jalur inhibitor hanya bisa diuji di
+sesi nyata — jalur media tetap bisa diuji dengan player MPRIS palsu.
