@@ -82,7 +82,38 @@ izin eksplisit, satu per satu. Kalau splash masih teks, cek
 `plymouth-set-default-theme` dan log debug:
 `cat /proc/cmdline` (perlu `plymouth.debug=...`), lalu `journalctl -b | grep -i plymouth`. Drop-in diagnosis ada di `assets/plymouth/10-debug.conf` (jangan dipasang permanen).
 
-## 11. Verifikasi tanpa merusak sesi
+## 11. Jam ambient tidak mau hilang saat laptop dicolokkan
+
+Dua hal yang mudah tertukar: blank-nya layar diatur power policy, veil diatur
+timer idle milik `noir-clock` sendiri. Karena itu "jangan sleep saat AC" dulu
+tidak otomatis menghapus layar ambient. Sejak TIER 22c veil ikut `idle-delay`:
+kalau `gsettings get org.gnome.desktop.session idle-delay` bernilai 0, ambient
+tidak naik. Rem lain yang menahan veil: media MPRIS Playing, inhibitor pihak
+lain, jendela fullscreen — dan veil memang hanya dirancang untuk saat adaptor
+terpasang.
+
+## 12. Cluster/gear panel hilang, ekstensi berstatus ERROR
+
+Folder ekstensi hilang dari `~/.local/share/gnome-shell/extensions/` (kalau
+`noir-cluster` dan `noir-rail` mendeklarasikan `settings-schema`), `enable()`
+lempar `Schema ... could not be found` dan shell menandai state 3 = ERROR.
+Ekstensi tanpa schema bisa tetap terlihat hidup dari cache JS file yang sudah
+dihapus, jadi "jam masih ada" bukan bukti folder masih ada.
+
+Pasang ulang dari repo: `bash scripts/install.sh` (menyalin extension lalu
+`glib-compile-schemas` tiap `schemas/`). Verifikasi tanpa logout:
+
+```
+bash scripts/install.sh --check                       # keempatnya "ada"
+GSETTINGS_SCHEMA_DIR=~/.local/share/gnome-shell/extensions/noir-cluster@arkan/schemas \
+  gsettings list-recursively org.gnome.shell.extensions.noir-cluster
+```
+
+`gnome-extensions disable` + `enable` TIDAK menyembuhkan state ERROR di sesi
+yang sedang jalan: shell menyusun source schema sekali saat startup, jadi
+direktori `schemas/` yang baru muncul tidak ikut terbaca. Logout/login.
+
+## 13. Verifikasi tanpa merusak sesi
 
 Untuk uji tata letak dipakai Xephyr (:9) dengan shell sendiri, sehingga sesi
 live tidak ikut menerima input sintetis. Screenshot di Xephyr butuh gerakan

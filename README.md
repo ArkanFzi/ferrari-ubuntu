@@ -127,7 +127,8 @@ wpctl status | grep -A2 canberra                    # stream [active]
   tiling, indikator baterai, dan garis tema shell.
 - **Sesi malam**: night light 17:30 → 06:00 pada 3500 K, idle suspend dimatikan
   (`idle-delay 0`) dan noir-clock memegang inhibitor agar pemutaran video tidak
-  membuat laptop tertidur.
+  membuat laptop tertidur. Jam ambient ikut `idle-delay`: selama 0, layar tidak
+  pernah berubah jadi jam besar.
 - **Audio event**: panggilan radio saat kabel masuk/lepas, baterai 20 %, dan
   pengisian penuh; suara sistem `power-plug`/`power-unplug`/`battery-low`
   diganti versi noir di folder sound user.

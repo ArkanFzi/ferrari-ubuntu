@@ -6,9 +6,7 @@
 // + get_context() (pola yang sama dipakai ui/barLevel.js upstream).
 //
 // TIER 22 menambahkan layar ambient: setelah dua menit tanpa input, veil noir
-// menutup desktop dan jam yang sama dipasang besar di tengah. idle-delay=0 sudah
-// membuat shell tidak pernah mematikan layar, jadi fitur ini murni tambahan —
-// tidak menyentuh gsettings maupun power policy.
+// menutup desktop dan jam yang sama dipasang besar di tengah.
 //
 // TIER 22b: "tidak ada input" ternyata bukan "tidak ada aktivitas". Video yang
 // diputar tanpa disentuh membuat veil menutupi YouTube (suara jalan, layar jadi
@@ -16,6 +14,11 @@
 // rem — media MPRIS yang sedang Playing, inhibitor gnome-session, jendela
 // fullscreen — plus satu layanan baru: selama media jalan noir-clock memegang
 // Inhibit(Suspend|Idle) supaya laptop juga benar-benar tidak tertidur.
+//
+// TIER 22c: layar yang tidak pernah blank (idle-delay=0, misalnya "jangan sleep
+// saat adaptor terpasang") membuat veil menempel selamanya, padahal ia hanya
+// mengisi celah sebelum layar mati. Jadi naik-turunnya sekarang ikut
+// idle-delay: blanking mati = ambient mati. Setting tetap dibaca, tidak ditulis.
 
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
@@ -279,6 +282,7 @@ export default class NoirClockExtension extends Extension {
     this._amb.opacity = 0;
 
     this._watchPower();
+    this._watchBlank();
     this._watchSession();
     this._placeAmbient();
 
@@ -325,6 +329,16 @@ export default class NoirClockExtension extends Extension {
         this._onBattery = !!this._powerProxy.get_cached_property('OnBattery')?.unpack();
       });
     this._onBattery = !!this._powerProxy.get_cached_property('OnBattery')?.unpack();
+  }
+
+  // Veil butuh batas mati layar dari sesi, bukan dari kami: idle-delay=0 berarti
+  // user tidak pernah menginginkan layar pengantar, jadi ambient tidak boleh naik.
+  _watchBlank() {
+    this._blank = new Gio.Settings({ schema_id: 'org.gnome.desktop.session' });
+    this._blankMs = this._blank.get_uint('idle-delay') * 1000;
+    this._blankId = this._blank.connect('changed::idle-delay', () => {
+      this._blankMs = this._blank.get_uint('idle-delay') * 1000;
+    });
   }
 
   _watchSession() {
@@ -496,7 +510,7 @@ export default class NoirClockExtension extends Extension {
   }
 
   _shouldRaise(idle) {
-    return !this._onBattery && idle >= AMB_IDLE_MS &&
+    return !this._onBattery && this._blankMs > AMB_IDLE_MS && idle >= AMB_IDLE_MS &&
       !this._awakeRecently() && !this._blocked();
   }
 
@@ -596,6 +610,10 @@ export default class NoirClockExtension extends Extension {
       this._powerProxy.disconnect(this._powerChangedId);
     this._powerChangedId = 0;
     this._powerProxy = null;
+    if (this._blankId)
+      this._blank.disconnect(this._blankId);
+    this._blankId = 0;
+    this._blank = null;
     this._idle = null;
 
     Main.layoutManager.removeChrome(this._amb);

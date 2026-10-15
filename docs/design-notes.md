@@ -32,7 +32,9 @@ kuning jadi rosso membuat peringatan hilang artinya.
 
 ## TIER 9/16 — jam & rail
 
-- `noir-clock@arkan`: jam analog noir + layar ambient saat idle. Pegang
+- `noir-clock@arkan`: jam analog noir + layar ambient saat idle. Veil hanya naik
+  kalau sesi memang menjadwalkan blank (`idle-delay` > ambang dua menit), jadi
+  "jangan sleep saat adaptor terpasang" juga mematikan jam ambient. Pegang
   inhibitor suspend/idle selama pemutaran media aktif supaya YouTube tidak
   membuat laptop tertidur. X11-only untuk bagian xwinwrap-nya.
 - `noir-rail@arkan`: rel sub-panel di sisi dock, toggle lewat ikon dock.
