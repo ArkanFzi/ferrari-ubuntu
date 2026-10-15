@@ -9,6 +9,20 @@ layar login (GDM) dan splash Plymouth.
 Repo ini berisi **kode dan aset buatan sendiri** serta langkah memasang
 dependensi pihak ketiga. Bukan fork besar tema ikon/GTK.
 
+## Tampilan
+
+![Desktop noir: panel ramping dengan cluster rev-light dan RACE di kanan atas, dock full-height di kiri, jam analog di desktop](docs/gambar/desktop.png)
+
+| Quick Settings: kartu berbingkai rosso, baterai dan mode daya | Rail sub-panel di sisi dock (`Super+R`) |
+|---|---|
+| ![Quick Settings noir dengan aksen Rosso Corsa](docs/gambar/quick-settings.png) | ![Rail noir berisi aplikasi terkini dan folder tersering](docs/gambar/rail.png) |
+
+Ketiga gambar dirender pada 1920x1080 dari rig Xephyr (:9) dengan salinan dconf
+tersendiri, jadi sesi kerja tidak ikut tersentuh. Nama jaringan Wi-Fi/VPN dan
+isi riwayat pada rail disensor — datanya berasal dari mesin pengembang. Layar
+ambient `noir-clock` belum ditampilkan karena idle monitor X11 di dalam
+Xephyr melapor hitung-mundur, sehingga veil tidak pernah naik di rig.
+
 ```
 ferrari-ubuntu/
 ├── README.md                  dokumen ini
@@ -23,7 +37,8 @@ ferrari-ubuntu/
 ├── settings/                  noir.dconf + terminal-profile.dconf
 ├── scripts/                   install, apply-settings, fetch-deps, install-system,
 │                              revert, sanitize-check, refresh-settings
-└── docs/                      design-notes, troubleshooting, publication-checklist
+└── docs/                      design-notes, troubleshooting, publication-checklist,
+                               gambar/ (screenshot 1920x1080 dari rig)
 ```
 
 ## Prasyarat

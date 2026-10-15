@@ -52,3 +52,8 @@ lain yang nilai aslinya tidak dia kenal.
 13. Pantau `git log` tetap bersih dari data pribadi saat kamu menambah aset.
 14. Jalankan ulang `sanitize-check.sh` sebelum tiap rilis/tag, dan jangan
     menandai tag sebelum keluar 0.
+15. Menambah screenshot? Ambil dari rig Xephyr (:9) dengan `XDG_CONFIG_HOME` ke
+    salinan dconf — jangan dari sesi kerja, karena dock, rail, dan Quick Settings
+    di sana memuat nama aplikasi, path folder, dan SSID kamu. Sensor label jaringan
+    dan isi riwayat sebelum masuk `docs/gambar/`; `sanitize-check.sh` ikut memindai
+    isi PNG, tapi ia tidak bisa membaca piksel, jadi sensor tetap tugas manusia.
