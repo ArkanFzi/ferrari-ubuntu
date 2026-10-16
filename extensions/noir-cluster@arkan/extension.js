@@ -1,7 +1,8 @@
 // noir-cluster@arkan — cluster pengemudi.
 // Mode berkendara bukan stiker: WET/SPORT/RACE menulis profil ke
-// power-profiles-daemon dan ikut mengubah perilaku shell. Rev-light sepuluh
-// segmen digambar dari delta /proc/stat, bukan dari perkiraan.
+// power-profiles-daemon dan ikut mengubah perilaku shell. AUTO menyerahkan
+// pilihan profil itu ke termostat suhu CPU/GPU. Rev-light sepuluh segmen
+// digambar dari delta /proc/stat, bukan dari perkiraan.
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
@@ -58,6 +59,43 @@ const GEARS = ['N', '1', '1', '2', '2', '3', '3', '4', '4', '5', '6'];
 // tetap tiga digit di rentang penuh.
 const KMH_PER_PCT = 3.6;
 
+// Sensor dicari lewat isi file `name`, bukan lewat nomor direktori: kernel
+// menomor ulang hwmon setiap boot, jadi hwmon4 hari ini bukan hwmon4 besok.
+const HWMON_ROOT = '/sys/class/hwmon';
+const FAN_SENSOR = 'hp';
+const CPU_SENSORS = ['coretemp', 'acpitz_0'];
+const GPU_CMD = ['nvidia-smi', '--query-gpu=temperature.gpu', '--format=csv,noheader'];
+// Terukur 26 ms untuk satu panggilan nvidia-smi di mesin ini; tetap dijalankan
+// async supaya main loop shell tidak pernah menunggu subprocess.
+const THERMAL_POLL_MS = 5000;
+// dGPU boleh tertidur (hybrid graphics): nvidia-smi gagal lalu hidup lagi.
+// Angka yang hilang karena gagal baca hanya ditahan sebentar, bukan membuat
+// telemetri GPU mati sampai logout.
+const GPU_RETRY_TICKS = 12;
+
+// Tangga termostat. Angka bawah adalah ambang naik, angka setelahnya ambang
+// turun — selisihnya 7 C, jadi fan tidak berayun di suhu yang bergoyang 1-2
+// derajat. Diukur di mesin ini: coretemp paket 65-70 C saat idle dan meledak
+// ke 87-93 C setiap burst singkat, choices OEM-nya cool/quiet/balanced/
+// performance; power-profiles-daemon hanya mengekspos tiga yang terakhir
+// (power-saver terbukti menulis 'quiet' ke platform-profile), jadi 'cool'
+// tidak bisa dijangkau tanpa root dan tidak dipakai di sini.
+const AUTO_UP_MID = 75;
+const AUTO_UP_HIGH = 85;
+const AUTO_DOWN_MID = 68;
+const AUTO_DOWN_HIGH = 78;
+const AUTO_GPU_HOT = 88;
+// Naik boleh cepat, turun harus sabar: thermald dan EC butuh tenang, dan dua
+// tingkat sekaligus dalam satu langkah terdengar seperti fan yang bingung.
+const AUTO_RISE_MS = 15 * 1000;
+const AUTO_FALL_MS = 90 * 1000;
+// Dua jendela rata-rata. Naik pakai 15 s supaya fan bergerak cepat; turun
+// pakai 60 s supaya burst pendek tidak ikut menentukan.
+const AUTO_RISE_SAMPLES = 3;
+const AUTO_FALL_SAMPLES = 12;
+const BAND_PROFILE = ['power-saver', 'balanced', 'performance'];
+const PROFILE_BAND = { 'power-saver': 0, balanced: 1, performance: 2 };
+
 const STATS_DIR = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'noir-cluster']);
 const STATS_FILE = GLib.build_filenamev([STATS_DIR, 'launch-times.json']);
 const STATS_MAX = 20;
@@ -77,8 +115,11 @@ const MODES = {
   WET: { profile: 'power-saver', revs: 'off', livery: 'wet' },
   SPORT: { profile: 'balanced', revs: 'ac', livery: null },
   RACE: { profile: 'performance', revs: 'on', livery: 'race' },
+  // AUTO tidak membawa profil tetap: profilnya ditulis oleh termostat, dan
+  // livery mengikuti profil yang sedang berlaku, bukan nama mode-nya.
+  AUTO: { profile: null, revs: 'ac', livery: 'auto' },
 };
-const ORDER = ['WET', 'SPORT', 'RACE'];
+const ORDER = ['WET', 'SPORT', 'RACE', 'AUTO'];
 const BY_PROFILE = { 'power-saver': 'WET', balanced: 'SPORT', performance: 'RACE' };
 
 export default class NoirClusterExtension extends Extension {
@@ -96,9 +137,23 @@ export default class NoirClusterExtension extends Extension {
     this._prevTotal = 0;
     this._onBat = false;
     this._sampleId = 0;
+    this._thermId = 0;
     this._keyId = 0;
     this._appId = 0;
     this._capId = 0;
+    this._cpuT = null;
+    this._gpuT = null;
+    this._fan = [null, null];
+    this._hwmon = {};
+    this._gpuBusy = false;
+    this._gpuSkip = 0;
+    this._gpuDead = false;
+    this._gpuProc = null;
+    this._temps = [];
+    this._autoProfile = null;
+    this._autoBand = -1;
+    this._autoWant = -1;
+    this._autoWantSince = 0;
     this._ids = [];
     this._timers = new Set();
     this._launching = new Map();
@@ -131,6 +186,10 @@ export default class NoirClusterExtension extends Extension {
     // saat login akan membalik pilihan user tanpa diminta.
     this._setMode(this._adoptedMode(), true);
 
+    // Preferensi AUTO bertahan lintas login; selain itu profil live yang menang.
+    if (this._settings.get_boolean('auto-cooling'))
+      this._setMode('AUTO', true);
+
     this._keyId = Main.wm.addKeybinding('cycle-mode', this._settings,
       Meta.KeyBindingFlags.NONE, Shell.ActionMode.ALL, () => this._cycle());
 
@@ -138,6 +197,12 @@ export default class NoirClusterExtension extends Extension {
       this._tick();
       return GLib.SOURCE_CONTINUE;
     });
+
+    this._thermId = GLib.timeout_add(GLib.PRIORITY_LOW, THERMAL_POLL_MS, () => {
+      this._sensorsTick();
+      return GLib.SOURCE_CONTINUE;
+    });
+    this._sensorsTick();
   }
 
   disable() {
@@ -157,6 +222,14 @@ export default class NoirClusterExtension extends Extension {
     if (this._sampleId)
       GLib.source_remove(this._sampleId);
     this._sampleId = 0;
+    if (this._thermId)
+      GLib.source_remove(this._thermId);
+    this._thermId = 0;
+    if (this._gpuProc) {
+      this._gpuProc.cancel();
+      this._gpuProc = null;
+    }
+    this._gpuBusy = false;
 
     for (const [proxy, id] of this._ids)
       proxy?.disconnect(id);
@@ -183,6 +256,13 @@ export default class NoirClusterExtension extends Extension {
     this._caption = null;
     this._leds = [];
     this._ppd = this._ppdProps = this._up = this._upDev = this._session = null;
+    this._thermItem = null;
+    this._hwmon = {};
+    this._cpuT = this._gpuT = null;
+    this._fan = [null, null];
+    this._autoProfile = null;
+    this._autoBand = -1;
+    this._autoWant = -1;
     this._mode = null;
   }
 
@@ -241,6 +321,19 @@ export default class NoirClusterExtension extends Extension {
       const mode = BY_PROFILE[prof];
       if (!mode) {
         log(`noir-cluster: profil ${prof} diabaikan`);
+        return;
+      }
+      // Dalam AUTO, perubahan profil bukan perintah ganti mode — kebanyakan
+      // justru tulisan termostat sendiri. Nilai baru hanya dicatat sebagai
+      // tingkat sekarang, jadi Quick Settings tetap boleh menimpa dan AUTO
+      // menghitung dari sana, bukan melawannya.
+      if (this._mode === 'AUTO') {
+        this._autoProfile = prof;
+        this._autoBand = PROFILE_BAND[prof] ?? this._autoBand;
+        this._autoWant = -1;
+        this._syncInhibit(this._inhibitWanted());
+        this._applyLivery('AUTO');
+        this._paintChip();
         return;
       }
       this._setMode(mode, true);
@@ -343,20 +436,269 @@ export default class NoirClusterExtension extends Extension {
 
     this._applying = true;
     this._mode = next;
-    if (!fromDbus) {
-      this._call(this._ppdProps, 'Set',
-        new GLib.Variant('(ssv)', [PPD_NAME, 'ActiveProfile', new GLib.Variant('s', m.profile)]));
+    if (next === 'AUTO') {
+      // AUTO tidak membawa profil: mulai dari profil yang sedang berlaku supaya
+      // termostat tidak membalik pilihan user pada detik pertama.
+      this._autoProfile = this._profile();
+      this._autoBand = PROFILE_BAND[this._autoProfile] ?? 1;
+      this._autoWant = -1;
+      this._temps = [];
+    } else {
+      this._autoProfile = null;
+      this._autoBand = -1;
+      this._autoWant = -1;
+      if (!fromDbus) {
+        this._call(this._ppdProps, 'Set',
+          new GLib.Variant('(ssv)', [PPD_NAME, 'ActiveProfile', new GLib.Variant('s', m.profile)]));
+      }
     }
-    this._syncInhibit(next === 'RACE');
+    if (!fromDbus)
+      this._settings.set_boolean('auto-cooling', next === 'AUTO');
+    this._syncInhibit(this._inhibitWanted());
     this._applyLivery(next);
     this._paintChip();
     if (m.revs === 'off')
       this._parkRevs(true);
     this._applying = false;
-    log(`noir-cluster: mode ${next} (${m.profile})`);
+    log(`noir-cluster: mode ${next} (${next === 'AUTO' ? `auto/${this._autoProfile}` : m.profile})`);
+  }
+
+  // Inhibitor mengikuti profil yang benar-benar berlaku, bukan nama mode: AUTO
+  // yang sedang di puncak sama kerasnya dengan RACE yang dipilih manual.
+  _inhibitWanted() {
+    return this._mode === 'RACE' ||
+      (this._mode === 'AUTO' && this._autoProfile === 'performance');
+  }
+
+  // ── termostat AUTO ──────────────────────────────────────────────────────
+  _sensorsTick() {
+    const seen = [];
+    for (const sensor of CPU_SENSORS) {
+      const dir = this._findHwmon(sensor);
+      if (!dir)
+        continue;
+      const t = parseInt(this._sysfs(`${dir}/temp1_input`), 10);
+      if (Number.isFinite(t))
+        seen.push(t / 1000);
+    }
+    this._cpuT = seen.length ? Math.max(...seen) : null;
+
+    const fan = this._findHwmon(FAN_SENSOR);
+    this._fan = [1, 2].map(i => {
+      const v = fan ? parseInt(this._sysfs(`${fan}/fan${i}_input`), 10) : NaN;
+      return Number.isFinite(v) ? v : null;
+    });
+
+    this._readGpu();
+    this._paintTelemetry();
+    this._autoTick();
+  }
+
+  // Nomor hwmon tidak stabil, jadi sensor dikenali dari isi `name`. Hasil
+  // pencarian disimpan tapi selalu diverifikasi ulang: nama yang hilang saat
+  // modul unload tinggal membuat pencarian ulang, bukan membaca angka salah.
+  _findHwmon(want) {
+    const cached = this._hwmon[want];
+    if (cached && this._sysfs(`${cached}/name`) === want)
+      return cached;
+    let dir;
+    try {
+      dir = GLib.Dir.open(HWMON_ROOT, 0);
+    } catch {
+      return null;
+    }
+    for (let n = dir.read_name(); n !== null; n = dir.read_name()) {
+      const path = GLib.build_filenamev([HWMON_ROOT, n]);
+      if (this._sysfs(`${path}/name`) === want) {
+        dir.close();
+        this._hwmon[want] = path;
+        return path;
+      }
+    }
+    dir.close();
+    return null;
+  }
+
+  _sysfs(path) {
+    try {
+      const [, bytes] = GLib.file_get_contents(path);
+      return new TextDecoder().decode(bytes).trim();
+    } catch {
+      return null;
+    }
+  }
+
+  _readGpu() {
+    if (this._gpuBusy)
+      return;
+    if (this._gpuSkip > 0) {
+      this._gpuSkip--;
+      return;
+    }
+    let proc;
+    try {
+      proc = Gio.Subprocess.new(GPU_CMD,
+        Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+    } catch {
+      // Mesin tanpa driver/binary NVIDIA: jangan pasang subprocess gagal
+      // sepanjang sesi.
+      this._gpuDead = true;
+      this._gpuT = null;
+      this._paintTelemetry();
+      return;
+    }
+    this._gpuBusy = true;
+    this._gpuProc = proc;
+    proc.communicate_async(null, null, (p, res) => {
+      this._gpuBusy = false;
+      this._gpuProc = null;
+      if (!this._mode)
+        return;
+      let temp = null;
+      try {
+        // communicate_utf8_finish() bikin SIGSEGV kalau anak tidak menulis
+        // apa pun ke stdout (nvidia-smi yang gagal karena dGPU tertidur):
+        // GJS mengembalikan buffer NULL. Versi byte aman — keluarannya
+        // GBytes berukuran 0 — jadi decoding dilakukan sendiri.
+        const [, bytes] = p.communicate_finish(res);
+        const text = new TextDecoder().decode(bytes ? bytes.toArray() : new Uint8Array());
+        const t = parseInt(text.trim(), 10);
+        if (Number.isFinite(t))
+          temp = t;
+      } catch {
+        // Dibatalkan saat disable(): angka terakhir dipertahankan.
+        return;
+      }
+      this._gpuT = temp;
+      this._gpuSkip = temp === null ? GPU_RETRY_TICKS - 1 : 0;
+      this._paintTelemetry();
+    });
+  }
+
+  _hotTemp() {
+    const seen = [this._cpuT, this._gpuT].filter(t => typeof t === 'number');
+    return seen.length ? Math.max(...seen) : null;
+  }
+
+  // Tangga + semua rem, dipisah dari timer supaya ambangnya bisa diuji tanpa
+  // shell dan tanpa memanaskan mesin. `rise` rata-rata pendek (15 s), `fall`
+  // rata-rata panjang (60 s).
+  _wantBand(rise, fall, band, { onBattery, gpuHot, throttled }) {
+    let want = band;
+    if (rise >= AUTO_UP_HIGH)
+      want = 2;
+    else if (rise >= AUTO_UP_MID)
+      want = Math.max(want, 1);
+    // Turun hanya boleh diputuskan oleh rata-rata panjang, dan hanya kalau
+    // 15 detik terakhir tidak sedang memanas: rata-rata panjang selalu atras,
+    // tanpa rem ini AUTO akan melonggarkan profil tepat saat beban mulai naik.
+    // Suhu sesaat tidak dipakai sebagai rem — di mesin ini ia melompat ke 89 C
+    // walau idle (diukur: 3% dari 60 sampel di atas 85 C) dan dwell turun tidak
+    // akan pernah selesai.
+    if (rise < AUTO_UP_MID) {
+      if (fall <= AUTO_DOWN_MID)
+        want = 0;
+      else if (fall <= AUTO_DOWN_HIGH)
+        want = Math.min(want, 1);
+    }
+    // Di baterai, performa puncak tidak membuat apa pun lebih dingin.
+    if (onBattery)
+      want = Math.min(want, 1);
+    // GPU panas: tidak boleh turun, walaupun indikator lain menyuruh.
+    if (gpuHot)
+      want = Math.max(want, band);
+    // PPD/thermald sedang memotong sendiri (baterai kritis, batas termal):
+    // biarkan dia yang pegang, AUTO hanya boleh turun.
+    if (throttled)
+      want = Math.min(want, band);
+    // Turun boleh satu tingkat per langkah, tidak boleh loncat.
+    if (want < band)
+      want = band - 1;
+    return want;
+  }
+
+  _autoTick() {
+    if (this._mode !== 'AUTO' || !this._settings.get_boolean('auto-cooling'))
+      return;
+    const t = this._hotTemp();
+    if (t === null)
+      return;
+
+    this._temps.push(t);
+    if (this._temps.length > AUTO_FALL_SAMPLES)
+      this._temps.shift();
+    const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+    const rise = mean(this._temps.slice(-AUTO_RISE_SAMPLES));
+    const fall = mean(this._temps);
+
+    const band = this._autoBand < 0 ? 1 : this._autoBand;
+    const want = this._wantBand(rise, fall, band, {
+      onBattery: this._onBattery(),
+      gpuHot: typeof this._gpuT === 'number' && this._gpuT >= AUTO_GPU_HOT,
+      throttled: !!(this._cached(this._ppd, 'PerformanceInhibited') ||
+        this._cached(this._ppd, 'PerformanceDegraded')),
+    });
+
+    if (want === band) {
+      this._autoWant = -1;
+      return;
+    }
+    const now = GLib.get_monotonic_time() / 1000;
+    if (this._autoWant !== want) {
+      this._autoWant = want;
+      this._autoWantSince = now;
+      return;
+    }
+    const hold = want > band ? AUTO_RISE_MS : AUTO_FALL_MS;
+    if (now - this._autoWantSince < hold)
+      return;
+    this._applyBand(want, t, fall);
+  }
+
+  _applyBand(band, t, fall) {
+    const prof = BAND_PROFILE[band];
+    this._temps = [];
+    this._applying = true;
+    const ok = this._call(this._ppdProps, 'Set',
+      new GLib.Variant('(ssv)', [PPD_NAME, 'ActiveProfile', new GLib.Variant('s', prof)])) !== null;
+    this._applying = false;
+    this._autoBand = band;
+    this._autoWant = -1;
+    if (ok)
+      this._autoProfile = prof;
+    this._syncInhibit(this._inhibitWanted());
+    this._applyLivery('AUTO');
+    this._paintChip();
+    log(`noir-cluster: auto ${Math.round(t)}C (rata2 ${Math.round(fall)}C) -> ${prof}${ok ? '' : ' (Set ditolak)'}`);
+  }
+
+  _telemetryText() {
+    const num = v => (typeof v === 'number' ? `${Math.round(v)}` : '—');
+    const fan = this._fan.map(num).join('/');
+    return `CPU ${num(this._cpuT)}°  GPU ${num(this._gpuT)}°  FAN ${fan} rpm`;
+  }
+
+  _paintTelemetry() {
+    const text = this._telemetryText();
+    if (this._thermItem)
+      this._thermItem.label.set_text(text);
+    this._chipTooltip();
+  }
+
+  _chipTooltip() {
+    if (!this._chip)
+      return;
+    const state = this._mode === 'AUTO'
+      ? `AUTO · tingkat ${this._autoBand} · profil ${this._autoProfile ?? '—'}`
+      : `${this._mode} · profil ${this._profile()}`;
+    this._chip.tooltip_text = `${this._telemetryText()}\n${state}`;
   }
 
   _liveryFile(mode) {
+    // AUTO bukan nama livery: yang dipakai livery dari profil yang sedang
+    // berlaku, jadi wallpaper ikut panas-dingin dan bukan ikut nama mode.
+    if (mode === 'AUTO')
+      mode = BY_PROFILE[this._autoProfile ?? this._profile()] ?? 'SPORT';
     const f = mode && MODES[mode].livery ? `ferrari-livery-${MODES[mode].livery}.xml` : LIVERY_NETRAL;
     return GLib.build_filenamev([BG_DIR, f]);
   }
@@ -438,6 +780,14 @@ export default class NoirClusterExtension extends Extension {
     box.add_child(this._label);
     this._chip.add_child(box);
 
+    // Baris telemetry paling atas: buka menu = baca instrumen. Sengaja tidak
+    // menambah actor ke panel — angka suhu/RPM tinggal di menu dan tooltip,
+    // jadi TIER 3 (panel sunyi) tidak dilanggar.
+    this._thermItem = new PopupMenu.PopupMenuItem(this._telemetryText(), { reactive: false });
+    this._thermItem.add_style_class_name('noir-cluster-therm');
+    this._chip.menu.addMenuItem(this._thermItem);
+    this._chip.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
     for (const name of ORDER) {
       const item = new PopupMenu.PopupMenuItem(name);
       item.connect('activate', () => this._setMode(name, false));
@@ -481,8 +831,8 @@ export default class NoirClusterExtension extends Extension {
     if (!this._chip)
       return;
     this._label.set_text(this._mode);
-    for (const cls of ['wet', 'sport', 'race'])
-      this._chip.remove_style_class_name(`noir-cluster--${cls}`);
+    for (const name of ORDER)
+      this._chip.remove_style_class_name(`noir-cluster--${name.toLowerCase()}`);
     this._chip.add_style_class_name(`noir-cluster--${this._mode.toLowerCase()}`);
     for (const name of ORDER) {
       const it = this._items[name];
@@ -495,6 +845,7 @@ export default class NoirClusterExtension extends Extension {
     this._liveryItem?.setToggleState(this._settings.get_boolean('livery'), false);
     this._launchItem?.setToggleState(this._settings.get_boolean('launch-stats'), false);
     this._radioItem?.setToggleState(this._settings.get_boolean('team-radio'), false);
+    this._chipTooltip();
   }
 
   // ── rev-light ───────────────────────────────────────────────────────────

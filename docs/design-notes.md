@@ -82,6 +82,56 @@ Dua keputusan yang bikin chip ini bisa dipercaya:
 
 Chip tidak memegang inhibitor sendiri: dia hanya pembaca.
 
+## TIER 26 — AUTO: termostat suhu di cluster
+
+Permintaannya "atur kecepatan fan dari suhu CPU dan GPU". Yang bisa ditulis di
+mesin ini bukan kecepatan fan:
+
+- `hp_wmi` (hwmon `name=hp`) memberi `fan1_input`/`fan2_input` **dibaca**
+  (3406/2917 rpm), `pwm1_enable` = 2 milik root, dan **`pwm1` tidak ada** —
+  tidak ada jalur tulis untuk rpm;
+- `nvidia-smi` menolak field `fan_speed`, modul `nvcontrol` tidak terpasang;
+- satu-satunya knob yang bisa dijangkau tanpa root adalah profil daya:
+  power-profiles-daemon menulis ke `platform-profile` OEM. Terukur
+  `power-saver → quiet`, `balanced → balanced`, `performance → performance`;
+  pilihan OEM `cool` tidak diekspos PPD, jadi tidak dijangkau tanpa root.
+
+AUTO karena itu mengatur **batas daya**, dan EC/thermald yang memutar fan dari
+sana. Telemetri suhu + rpm kipas yang asli dipasang sebagai pembacaan murni.
+
+Keputusan yang tidak bisa ditebak dari perasaan:
+
+- **Satu penulis profil.** Cluster sudah memiliki profil daya (WET/SPORT/RACE).
+  Menaruh termostat di extension kedua berarti dua penulis yang saling
+  membalik, jadi AUTO masuk ke cluster yang sama, bukan extension baru.
+- **Ambang diturunkan dari distribusi yang diukur, bukan angka bulat cantik.**
+  60 sampel coretemp saat idle: min 52, p50 58, p90 75, max 89 °C —
+  3 % di atas 85 °C walau tidak ada apa-apa. Dengan ambang turun yang dibaca
+  dari angka sesaat, dwell 90 s tidak pernah selesai (teramati di rig: suhu
+  berganti 66/93 dari tick ke tick). Karena itu **naik memakai rata-rata 15 s,
+  turun memakai rata-rata 60 s**, dan turun hanya boleh kalau jendela 15 s tidak
+  sedang ≥ 75 °C — rata-rata panjang selalu atras, tanpanya AUTO melonggarkan
+  profil tepat saat beban mulai naik.
+- **Turun satu tingkat per langkah** (2→1→0), naik boleh langsung dua, dan
+  dwell naik 15 s / turun 90 s.
+- **Tiga rem.** Baterai memotong ke balanced (performa puncak tidak membuat
+  apa pun lebih dingin di baterai); GPU ≥ 88 °C mengunci keputusan turun;
+  `PerformanceInhibited`/`PerformanceDegraded` berarti thermald/PPD sedang
+  pegang kendali, AUTO hanya boleh ikut turun.
+- **AUTO mulai dari profil yang sedang berlaku**, bukan dari asumsi. Quick
+  Settings tetap boleh menimpa; perubahan profil dari luar hanya menggeser
+  tingkat awal termostat.
+- **Nomor hwmon tidak stabil antar boot**, jadi sensor dikenali dari isi
+  `name` (`hp`, `coretemp`, `acpitz_0`), dan cache-nya diverifikasi ulang tiap
+  baca.
+- **Telemetri tinggal di menu dan tooltip**, bukan di panel — TIER 3 (panel
+  sunyi) tidak dilanggar demi angka.
+
+`communicate_utf8_finish()` GJS membuat **SIGSEGV** kalau anak tidak menulis
+apa pun ke stdout (terjadi saat `nvidia-smi` gagal karena dGPU tertidur). Di
+luar shell itu cuma skrip mati; di dalam shell seluruh gnome-shell ikut mati.
+Versi byte (`communicate_finish`) aman — buffer kosong jadi `GBytes` ukuran 0.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di

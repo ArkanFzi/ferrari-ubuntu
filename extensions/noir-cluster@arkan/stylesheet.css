@@ -29,6 +29,23 @@
   background-color: #da291c;
 }
 
+/* AUTO: mesin yang mengatur dirinya sendiri, jadi tidak berhak memakai rosso —
+   warna itu punya RACE dan pindah gigi. Abu-abu terang menandai "hidup, tidak
+   sedang dipacu". */
+.noir-cluster--auto .noir-cluster-dot {
+  background-color: #b7b7b7;
+}
+
+/* Baris telemetry di menu cluster: angka suhu dan tachometer fan. Non-reaktif,
+   jadi tidak ikut menyala saat hover dan tidak bisa diklik. */
+.noir-cluster-therm {
+  font-family: Titillium Web;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: rgba(232, 232, 232, 0.55);
+}
+
 .noir-cluster--active {
   color: #da291c;
 }

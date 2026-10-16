@@ -120,6 +120,19 @@ bash scripts/apply-settings.sh --check               # "semua setelan sudah coco
 gnome-session-inhibit -l                             # entri suspend/idle menyalakan chip PIT
 ```
 
+Angka telemetri di menu chip harus sama dengan sensor aslinya (lm-sensors tidak
+dibutuhkan, semuanya sysfs):
+
+```bash
+C=$(grep -l '^coretemp$' /sys/class/hwmon/*/name | cut -d/ -f5)
+H=$(grep -l '^hp$'       /sys/class/hwmon/*/name | cut -d/ -f5)
+awk '{printf "CPU %d C\n", $1/1000}' /sys/class/hwmon/$C/temp1_input
+cat /sys/class/hwmon/$H/fan1_input /sys/class/hwmon/$H/fan2_input   # rpm kipas
+nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader        # suhu GPU
+powerprofilesctl get                            # profil yang sedang berlaku
+journalctl /usr/bin/gnome-shell -b | grep "noir-cluster: auto"      # langkah termostat
+```
+
 Uji suara radio tanpa mencabut kabel:
 
 ```bash
@@ -132,11 +145,13 @@ wpctl status | grep -A2 canberra                    # stream [active]
 ## Hasil akhir per area
 
 - **Panel**: tinggi 26 px, ikon tersembunyi rapi, cluster F1 di kanan (gear +
-  10 LED rev + kecepatan) yang hanya muncul saat mesin sibuk; papan pit-lane
-  menampilkan waktu buka aplikasi di slot yang sama. Chip `PIT` (noir-telemetry)
-  menyala di kanan selama ada pemutar media berstatus Playing atau ada pihak
-  lain menahan suspend/idle sesi — persis kondisi yang membuat layar ambient
-  noir-clock tidak boleh naik.
+  10 LED rev + kecepatan) yang hanya muncul saat mesin sibuk; mode WET/SPORT/
+  RACE/AUTO-nya memilih profil daya, dan menu chip memuat baris telemetri
+  `CPU … GPU … FAN …/… rpm` yang dibaca dari hwmon + nvidia-smi yang asli.
+  Papan pit-lane menampilkan waktu buka aplikasi di slot yang sama. Chip `PIT`
+  (noir-telemetry) menyala di kanan selama ada pemutar media berstatus Playing
+  atau ada pihak lain menahan suspend/idle sesi — persis kondisi yang membuat
+  layar ambient noir-clock tidak boleh naik.
 - **Dock**: kiri, full-height, fixed, ikon 48 px, indikator `DASHES`, dasar
   `#121212` dengan blur; mount + trash tampil sebagai seksi pemisah.
 - **Tipografi**: Inter 10 untuk UI, Titillium Web untuk angka (cluster, jam),
@@ -160,7 +175,9 @@ wpctl status | grep -A2 canberra                    # stream [active]
 | Ingin ubah | Cara |
 |---|---|
 | Warna aksen | cari `#da291c` di `theme/overrides/`, `assets/gdm/*.css`, `settings/*.dconf`; ganti, lalu pasang ulang |
-| Mode cluster (WET/SPORT/RACE) | `Shift+Super+M`, atau menu di chip panel |
+| Mode cluster (WET/SPORT/RACE/AUTO) | `Shift+Super+M`, atau menu di chip panel |
+| Ambang termostat AUTO | `extensions/noir-cluster@arkan/extension.js`: `AUTO_UP_*` / `AUTO_DOWN_*` (naik 15 dtk, turun 90 dtk) |
+| Matikan AUTO | pilih mode lain di menu chip — kunci `auto-cooling` ikut mati |
 | Matikan rev-light | menu chip → "Rev-light" (kunci `rev-lights`) |
 | Matikan team radio | menu chip → "Team radio" (kunci `team-radio`), atau `org.gnome.desktop.sound event-sounds` |
 | Buat suara radio baru | edit `assets/sounds/gen-radio.py` (bisa `RADIO_OUT=/tmp/x python3 gen-radio.py radio-plug` untuk uji), lalu salin `.oga` hasil render |

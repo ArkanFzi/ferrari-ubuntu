@@ -5,7 +5,12 @@
     <key name="cycle-mode" type="as">
       <default>['&lt;Shift&gt;&lt;Super&gt;m']</default>
       <summary>Putar mode berkendara</summary>
-      <description>Gerbang kunci untuk berpindah WET -&gt; SPORT -&gt; RACE.</description>
+      <description>Gerbang kunci untuk berpindah WET -&gt; SPORT -&gt; RACE -&gt; AUTO.</description>
+    </key>
+    <key name="auto-cooling" type="b">
+      <default>false</default>
+      <summary>Mode AUTO: profil daya diatur suhu</summary>
+      <description>Saat hidup, cluster memilih power-saver/balanced/performance dari suhu CPU dan GPU dengan histeresis, dan mode bertahan sampai login berikutnya. Saat mati, cluster hanya mengikuti profil yang sedang aktif.</description>
     </key>
     <key name="rev-lights" type="b">
       <default>true</default>

@@ -33,6 +33,19 @@ dan `get_x/get_y/get_width/get_height`. Kesalahan ini tidak tertangkap
 journalctl /usr/bin/gnome-shell -b | grep -i "noir\|Gjs-CRITICAL"
 ```
 
+Yang paling berbahaya bukan API hilang, tapi API yang ada dan berbohong:
+`Gio.Subprocess.communicate_utf8_finish()` **SIGSEGV** kalau anak tidak menulis
+apa pun ke stdout (buffer NULL). Di dalam gnome-shell itu membunuh seluruh
+shell — layar berkedip, semua ekstensi reload, dan sesi terasa error. Panggil
+`nvidia-smi` yang dGPU-nya tertidur justru mengembalikan stdout kosong, jadi
+bug ini mudah kena. Pakai `communicate_finish()` (versi byte) yang aman dan
+mengembalikan `GBytes` berukuran 0:
+
+```js
+const [, bytes] = proc.communicate_finish(res);
+const text = new TextDecoder().decode(bytes ? bytes.toArray() : new Uint8Array());
+```
+
 ## 5. D-Bus property: `deep_unpack()` dan `Gio.DBusProxy`
 
 Pakai `DBusProxy` per antarmuka, bukan `Gio.DBusConnection.call` (butuh 10 arg
@@ -127,9 +140,28 @@ direktori `schemas/` yang baru muncul tidak ikut terbaca. Logout/login.
 Untuk uji tata letak dipakai Xephyr (:9) dengan shell sendiri, sehingga sesi
 live tidak ikut menerima input sintetis. Screenshot di Xephyr butuh gerakan
 mouse terus-menerus (pixmap root basi tanpa input) dan `ffmpeg -f x11grab`.
-Di build ini `Xephyr -resize` tidak dikenal — ukuran ditentukan `-screen`, lalu
-dibetulkan dengan `xrandr --output default --mode ...` sebelum direkam, kalau
-tidak `ffmpeg` gagal dengan "Error opening input: Invalid argument".
+Di build ini `Xephyr -resize` tidak dikenal dan `xrandr --fb 1920x1080`
+ditolak, jadi layarnya nyata-nyata 1600x1200 — rekam dengan ukuran itu
+(`-video_size 1600x1200`), bukan ukuran yang kamu harapkan. Xephyr juga butuh
+dijalankan dari display Xwayland live:
+
+```bash
+DISPLAY=:1 XAUTHORITY=$(ls /run/user/1000/.mutter-Xwaylandauth.*) \
+  env -u WAYLAND_DISPLAY Xephyr :9 -screen 1600x1200 &
+```
+
+Dua aturan isolasi yang saya pelajari dengan cara keras:
+
+- **`XDG_CONFIG_HOME` harus di-set SEBELUM `dbus-run-session`.** Bentuk
+  `dbus-run-session -- env XDG_CONFIG_HOME=… gnome-shell` tidak mengisolasi
+  dconf: dbus-daemon dan `dconf-service` yang diaktifkannya mewarisi env
+  pemanggil, jadi tiap `gsettings set` dari rig masuk ke db live. Bentuk yang
+  benar: `env XDG_CONFIG_HOME=$RIG/config dbus-run-session -- env DISPLAY=:9
+  XDG_CONFIG_HOME=$RIG/config gnome-shell --x11 --replace`.
+- **PPD ada di bus sistem**, bukan bus sesi. Jadi termostat di rig benar-benar
+  mengganti power profile mesin nyata, dan `ActiveProfile` live harus
+  dikembalikan setelah selesai (`powerprofilesctl get`, lalu `set` bila perlu).
+  Cek juga `/sys/devices/platform/hp-wmi/platform-profile/platform-profile-0/profile`.
 
 ## 14. Chip PIT: cara membaca dan kalau tidak muncul
 
@@ -163,3 +195,38 @@ tidak ada penahan; tidak ada baris sama sekali berarti ekstensi tidak termuat.
 Catatan untuk rig: `org.gnome.SessionManager` tidak ada di bus privat
 `dbus-run-session` (`ServiceUnknown`), jadi jalur inhibitor hanya bisa diuji di
 sesi nyata — jalur media tetap bisa diuji dengan player MPRIS palsu.
+
+## 15. "Mode AUTO tidak mengubah rpm kipas" — memang tidak bisa
+
+Ini batas mesin, bukan bug ekstensi. Kecepatan fan di HP Victus diatur BIOS,
+dan satu-satunya file yang menyambung ke fan hanya bisa dibaca:
+
+```bash
+H=$(grep -l '^hp$' /sys/class/hwmon/*/name | cut -d/ -f5)   # hwmon4
+ls /sys/class/hwmon/$H/     # relevan: fan1_input fan2_input pwm1_enable — tidak ada pwm1
+stat -c '%A %U' /sys/class/hwmon/$H/pwm1_enable               # -rw-r--r-- root:root
+cat /sys/class/hwmon/$H/pwm1_enable                           # 2 = kontrol otomatis BIOS
+nvidia-smi --query-gpu=fan_speed --format=csv                  # Field "fan_speed" is not a valid field
+```
+
+Yang tidak ada di mesin ini: `pwm1`/`pwm1_target` (fan tertutup), modul `nvcontrol`
+untuk fan NVIDIA, dan akses ke profil `cool`. `powerprofilesctl list` hanya
+menawarkan `power-saver`/`balanced`/`performance`, padahal OEM punya
+`cool quiet balanced performance`:
+
+```bash
+cat /sys/devices/platform/hp-wmi/platform-profile/platform-profile-0/choices
+stat -c '%A %U' /sys/devices/platform/hp-wmi/platform-profile/platform-profile-0/profile
+```
+
+Profil `cool` ada di hardware tapi tidak diekspos PPD, dan `profile` milik
+root. Jadi tanpa root tidak ada satu pun tombol yang menulis rpm.
+
+Yang AUTO lakukan: mengganti **power profile** lewat `power-profiles-daemon`,
+satu-satunya penulis yang sah (`power-saver`/`balanced`/`performance`). Profil
+itu mengubah batas daya & kurva yang dipilih BIOS, dan rpm bergerak sebagai
+akibatnya. Karena itu angka `FAN …/… rpm` di menu adalah **bacaan**, bukan
+target — dan kalau kamu melihat rpm naik sementara ekstensi tidak menulis apa
+pun, itu memang jalur yang benar. Kalau mau tulis rpm langsung, dibutuhkan
+root helper + `pwm1_enable=1`; sengaja tidak dibuat (lihat TIER 26 di
+`design-notes.md`).
