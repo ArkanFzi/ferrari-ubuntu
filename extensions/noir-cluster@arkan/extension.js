@@ -111,13 +111,17 @@ const FUEL_LOW = 20;
 const FUEL_REARM = 25;
 const UP_STATE_FULLY_CHARGED = 4;
 
+// 'off' = strip tidak pernah muncul; 'on' = strip hidup terus. Dulu SPORT dan
+// AUTO berpintu AC ('ac'), tapi strip ini cuma baca /proc/stat — tidak ada
+// daya yang dihemat, jadi pintunya hanya membuat cluster hilang tanpa sebab
+// yang terlihat begitu kabel dicabut.
 const MODES = {
   WET: { profile: 'power-saver', revs: 'off', livery: 'wet' },
-  SPORT: { profile: 'balanced', revs: 'ac', livery: null },
+  SPORT: { profile: 'balanced', revs: 'on', livery: null },
   RACE: { profile: 'performance', revs: 'on', livery: 'race' },
   // AUTO tidak membawa profil tetap: profilnya ditulis oleh termostat, dan
   // livery mengikuti profil yang sedang berlaku, bukan nama mode-nya.
-  AUTO: { profile: null, revs: 'ac', livery: 'auto' },
+  AUTO: { profile: null, revs: 'on', livery: 'auto' },
 };
 const ORDER = ['WET', 'SPORT', 'RACE', 'AUTO'];
 const BY_PROFILE = { 'power-saver': 'WET', balanced: 'SPORT', performance: 'RACE' };
@@ -943,8 +947,7 @@ export default class NoirClusterExtension extends Extension {
     if (!this._mode)
       return;
     const gate = MODES[this._mode].revs;
-    const on = this._settings.get_boolean('rev-lights') &&
-      (gate === 'on' || (gate === 'ac' && !this._onBattery()));
+    const on = this._settings.get_boolean('rev-lights') && gate === 'on';
     if (!on) {
       this._parkRevs(true);
       return;

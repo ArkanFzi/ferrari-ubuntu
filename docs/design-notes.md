@@ -56,6 +56,11 @@ Panel tetap datang tanpa kaca supaya tinggi 26 px konsisten.
   kecepatan), pit-lane launch timer, dan team radio (kabel masuk/lepas,
   baterai 20 %, pengisian penuh). Cluster dan papan pesan occupies **slot yang
   sama** di panel supaya indikator tidak bergeser saat pesan muncul.
+- Strip cluster berpintu mode, bukan berpintu daya: `WET` tidak pernah
+  menampilkannya, tiga mode lain menampilkannya terus. Dulu SPORT/AUTO hanya
+  tampil saat kabel dicolok (nilai `'ac'`), dan itu jadi bug yang terasa seperti
+  "gear hilang sendiri" tiap kali charger dicabut — padahal pintunya tidak
+  menghemat apa pun karena strip hanya membaca delta `/proc/stat`.
 
 ## TIER 25 — chip PIT
 
