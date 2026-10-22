@@ -1,0 +1,127 @@
+/* noir-island@arkan — pill melayang di tengah atas panel.
+   Rosso Corsa #da291c dipakai hanya untuk hal yang sedang terjadi: titik hidup,
+   batang progres, dan tombol Tutup saat disorot. Saat diam island dibiarkan
+   netral supaya tidak bersaing dengan cluster rev-light di kanan panel. */
+
+.noir-island {
+  font-family: Inter;
+  font-size: 11px;
+  color: #f2f2f2;
+  background-color: rgba(14, 14, 16, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 17px;
+  padding: 0 12px;
+  spacing: 9px;
+}
+
+.noir-island-pillrow {
+  spacing: 8px;
+}
+
+.noir-island-row {
+  spacing: 10px;
+}
+
+.noir-island-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(242, 242, 242, 0.28);
+}
+
+.noir-island--live {
+  border-color: rgba(218, 41, 28, 0.35);
+}
+
+.noir-island--live .noir-island-dot {
+  background-color: #da291c;
+}
+
+.noir-island-kicker {
+  font-family: Titillium Web;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: rgba(242, 242, 242, 0.45);
+}
+
+.noir-island-pilltext {
+  font-size: 11px;
+  color: rgba(242, 242, 242, 0.62);
+}
+
+.noir-island-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f2f2f2;
+}
+
+.noir-island-sub {
+  font-size: 10px;
+  color: rgba(242, 242, 242, 0.60);
+}
+
+.noir-island-time {
+  font-family: Titillium Web;
+  font-size: 10px;
+  color: rgba(242, 242, 242, 0.45);
+}
+
+.noir-island-ctl {
+  spacing: 2px;
+}
+
+.noir-island-cover {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.06);
+  background-repeat: no-repeat;
+}
+
+.noir-island-prog {
+  background-color: rgba(255, 255, 255, 0.10);
+  border-radius: 2px;
+}
+
+.noir-island-progfill {
+  background-color: #da291c;
+  border-radius: 2px;
+}
+
+.noir-island-actions {
+  spacing: 6px;
+}
+
+.noir-island-btn {
+  padding: 4px 8px;
+  border-radius: 9px;
+  color: rgba(242, 242, 242, 0.78);
+}
+
+.noir-island-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.noir-island-btn:active {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.noir-island-btn--stop:hover {
+  background-color: rgba(218, 41, 28, 0.18);
+}
+
+.noir-island-btnlabel {
+  font-family: Titillium Web;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #f2f2f2;
+}
+
+.noir-island-badge {
+  font-family: Titillium Web;
+  font-size: 9px;
+  font-weight: 700;
+  color: #da291c;
+}

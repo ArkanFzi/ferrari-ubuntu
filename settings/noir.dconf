@@ -58,7 +58,7 @@
 /org/gnome/settings-daemon/plugins/color/night-light-temperature uint32 3500
 /org/gnome/shell/disable-user-extensions false
 /org/gnome/shell/disabled-extensions ['x11gestures@joseexposito.github.io']
-/org/gnome/shell/enabled-extensions ['ding@rastersoft.com', 'blur-my-shell@aunetx', 'compiz-alike-magic-lamp-effect@hermes83.github.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'noir-rail@arkan', 'noir-clock@arkan', 'noir-cluster@arkan', 'noir-startlights@arkan', 'noir-telemetry@arkan']
+/org/gnome/shell/enabled-extensions ['ding@rastersoft.com', 'blur-my-shell@aunetx', 'compiz-alike-magic-lamp-effect@hermes83.github.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'noir-rail@arkan', 'noir-clock@arkan', 'noir-cluster@arkan', 'noir-startlights@arkan', 'noir-telemetry@arkan', 'noir-island@arkan']
 /org/gnome/shell/favorite-apps ['firefox_firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop', 'org.gnome.Terminal.desktop']
 /org/gnome/shell/extensions/appindicator/icon-size 22
 /org/gnome/shell/extensions/appindicator/icon-spacing 10

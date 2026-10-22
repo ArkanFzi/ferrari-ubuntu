@@ -137,6 +137,65 @@ apa pun ke stdout (terjadi saat `nvidia-smi` gagal karena dGPU tertidur). Di
 luar shell itu cuma skrip mati; di dalam shell seluruh gnome-shell ikut mati.
 Versi byte (`communicate_finish`) aman — buffer kosong jadi `GBytes` ukuran 0.
 
+## TIER 27 — island media + notifikasi
+
+Permintaannya satu permukaan di tengah atas yang menampilkan apa yang sedang
+diputar **dan** push notifikasi, dengan prioritas. Dua hal itu bukan satu
+sumber data, jadi keduanya diukur lebih dulu sebelum satu baris pun ditulis:
+
+- **Media lewat MPRIS.** Spotify snap mendeklarasikan slot `interface: mpris`
+  (`/snap/spotify/current/meta/snap.yaml`), jadi namanya ikut muncul di bus
+  sesi host lengkap dengan `xesam:title/artist/album`, `mpris:length`, dan
+  `mpris:artUrl` https. Tidak ada pembacaan stream audio: yang dibaca adalah
+  status pemainnya.
+- **Notifikasi lewat `Main.messageTray`.** `org.freedesktop.Notifications` di
+  bus sesi cuma proksi tipis milik proses gjs terpisah; tujuan akhirnya ada di
+  dalam shell. Menyambungkan diri ke nama itu berarti merebut notifikasi dari
+  shell, jadi yang dipasangi handler adalah tray-nya.
+
+Prioritasnya tetap NOTIF > MEDIA > IDLE, dan island tidak naik selama jendela
+fullscreen — kecuali urgensi critical. Rosso hanya untuk yang sedang terjadi
+(TIER 0): titik hidup, batang progres, sorot tombol Tutup.
+
+Empat hal yang tidak bisa ditebak dan hanya ketahuan dari rig:
+
+- **Nilai `a{sv}` bersarang.** Variant bertipe `v` membungkus Variant aslinya,
+  jadi satu `unpack()` menyisakan objek, dan `PlaybackStatus` tidak pernah
+  sama dengan `'Playing'` — kartu media diam-diam tidak pernah muncul.
+  Dibuka berlapis sampai bukan Variant.
+- **`NameOwnerChanged` tidak sampai.** Proxy bus-driver + `connectSignal()`
+  tidak pernah memanggil handler di shell 46 (nol log, nol error). Player baru
+  ditemukan dengan poll `ListNames` tiap 2 dtk — pola yang sama sudah dipakai
+  noir-telemetry. `PropertiesChanged` tetap sinyal, lewat
+  `g-properties-changed` di proxy player.
+- **Ukur teks, jangan tebak lebarnya.** `St.Label` tidak punya properti
+  `ellipsize`/`ellipsis` di konstruktor (mencobanya = `Error: No property`,
+  extension gagal dimuat), dan ClutterText memanggang `ELLIPSIZE_END` sebagai
+  bawaan — kicker `DIAM` terpotong jadi `DIA…`. Ellipsize diset lewat
+  `get_clutter_text()`, dan lebar tiap state diambil dari lebar natural isinya
+  dengan konstanta sebagai batas bawah.
+- **Artwork tidak punya jalur langsung.** `Gio.Icon.new_for_pixbuf` tidak ada
+  di GJS 1.80, dan `load_contents_finish` mengembalikan `Uint8Array`, bukan
+  `GLib.Bytes`. Jalur yang jalan: bytes → `GLib.Bytes.new` → pixbuf diskala →
+  simpan PNG ke `$XDG_CACHE_HOME/noir-island/` → `background-image` di CSS.
+
+Dua keputusan bentuk:
+
+- **Click-through hanya saat diam.** Input region chrome ditentukan saat actor
+  dipasang, jadi island direbut-klik dengan `removeChrome` →
+  `addChrome({affectsInputRegion})` saat melebar, bukan dengan mengubah
+  properti.
+- **v1 tanpa gschema.** Skema baru baru terdaftar setelah logout/login, jadi
+  semua ambang (hold 8 s / 20 s, antrean 8, durasi 240 ms) masih konstanta di
+  puncak file. Yang bisa diubah pengguna masuk belakangan.
+
+Subjek uji bukan pemutar asli: rhythmbox mengirim notifikasinya sendiri (langsung
+merebut keadaan media) dan dua kali SIGSEGV di rig. Yang dipakai adalah service
+MPRIS palsu yang punya nama di bus, metadata lengkap, dan mengirim
+`PropertiesChanged` saat transport dipanggil — jadi kartu media, tombol
+prev/play/next, antrean `+N`, dan Tutup/Buka bisa dites terpisah dari
+aplikasi apa pun.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di

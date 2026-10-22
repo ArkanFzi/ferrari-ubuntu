@@ -1,0 +1,9 @@
+{
+  "uuid": "noir-island@arkan",
+  "name": "Noir Island",
+  "description": "Island melayang di tengah atas: pill click-through saat diam, melebar untuk now-playing dari MPRIS (judul, artis, artwork, tombol transport), dan didahulukan kartu notifikasi dengan tombol Buka/Tutup. Prioritas NOTIF > MEDIA > IDLE; tidak naik selama ada jendela fullscreen atau mode jangan-ganggu.",
+  "shell-version": [
+    "46"
+  ],
+  "version": 1
+}

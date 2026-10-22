@@ -28,7 +28,7 @@ ferrari-ubuntu/
 ├── README.md                  dokumen ini
 ├── LICENSE  NOTICE            lisensi karya sendiri + kredit pihak ketiga
 ├── extensions/                noir-cluster, noir-rail, noir-clock, noir-startlights,
-│                              noir-telemetry
+│                              noir-telemetry, noir-island
 ├── assets/
 │   ├── wallpapers/            hasil render sendiri + XML dinamis 3 fasa
 │   ├── sounds/                panggilan radio (.oga) + gen-radio.py
@@ -154,6 +154,12 @@ wpctl status | grep -A2 canberra                    # stream [active]
   layar ambient noir-clock tidak boleh naik.
 - **Dock**: kiri, full-height, fixed, ikon 48 px, indikator `DASHES`, dasar
   `#121212` dengan blur; mount + trash tampil sebagai seksi pemisah.
+- **Island** (noir-island): pill kecil click-through di tengah bawah panel;
+  melebar jadi kartu now-playing (artwork, judul/artis/album, progres, prev /
+  play-pause / next) begitu ada `org.mpris.MediaPlayer2.*` berstatus Playing,
+  dan didahulukan kartu notifikasi (ikon sumber, body, badge `+N`, tombol
+  Tutup/Buka yang bisa diklik). Prioritas NOTIF > MEDIA > IDLE; tidak naik
+  selama jendela fullscreen, kecuali urgensi critical.
 - **Tipografi**: Inter 10 untuk UI, Titillium Web untuk angka (cluster, jam),
   Hack untuk monospace; weekday + detik di jam panel; persen baterai tampil.
 - **Jendela**: layout tombol `close,minimize,maximize:` macOS, Super+Tab untuk
