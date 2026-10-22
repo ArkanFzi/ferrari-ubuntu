@@ -248,6 +248,44 @@ MPRIS palsu yang punya nama di bus, metadata lengkap, dan mengirim
 prev/play/next, antrean `+N`, dan Tutup/Buka bisa dites terpisah dari
 aplikasi apa pun.
 
+### Menyendiri: island tidur saat tidak ada yang dikatakan
+
+Notch yang selalu terpasang ternyata sama saja dengan ornamen: ia menempel
+tanpa mengatakan apa pun. Sekarang island mulai dari keadaan **tersimpan**
+(`_stowed`, actor `visible=false` sejak `enable()`) dan hanya keluar kalau ada
+isisnya. Aturan isinya satu baris: trek terpilih (lewat `_pick()`, jadi **paused
+pun ikut** — pill `JEDA` adalah satu-satunya tanda bahwa ada lagu siap
+dilanjutkan, dan itu keputusan eksplisit, bukan kebetulan) atau notifikasi yang
+sedang tampil / masih mengantre.
+
+- **Grace 4 dtk sebelum mundur.** Trek terakhir habis, trek berikutnya menyusul
+  1 dtk kemudian: tanpa jeda itu island kedip masuk-keluar di setiap pergantian
+  lagu. Jam mundurnya di `_tick()`, dan di-reset tiap kali ada isi.
+- **Masuk: unfold dari bezel.** `_unstash()` menaruh card di anchor dengan
+  tinggi 0 lalu `_animateTo()` biasa yang membukanya — isi baru dinyalakan
+  setelah card hampir penuh, sama seperti morph antar state. **Keluar:** tinggi
+  dan opacity ditarik bersamaan (`EASE_IN_QUART` 220 ms, lebih cepat dari morph
+  supaya terasa sebagai keputusan), row-row dimatikan lebih dulu karena Clutter
+  tidak memotong anak, lalu `visible=false` dan input region dilepas.
+- **Dua jalur yang mudah terlewat di `_render()`.** Kalau masih tersimpan dan
+  tidak ada isi, render berhenti (tidak ada yang perlu diukur); dan morph tetap
+  dipaksa walau state-nya sama (`state !== this._state || this._stowed`) — trek
+  berhenti lalu trek lain berhenti menghasilkan state `idle` yang identik, tanpa
+  paksaan itu card tetap setinggi 0.
+- **Animasi mikro yang menyertainya.** Batang progres di-`ease()` LINEAR
+  sepanjang satu tick 500 ms — di-`set_size()` mentah ia jadi anak tangga.
+  Pergantian trek di-cross-fade 120 ms (teks lama ke opacity 0, diisi, dinaikkan)
+  supaya tidak ada frame yang mencampur dua lagu. Rel rosso tumbuh dari tepi atas
+  lewat `scale_y` 0→1 dengan pivot di atas, **bukan** tinggi: anak dari
+  `St.BoxLayout` dialokasi ulang tiap frame, jadi animasi tingginya akan ditimpa
+  layout.
+- **Alat ukurnya juga harus diuji.** `pindah()` di rig mengklik pusat tombol dari
+  `get_transformed_position()` + `get_transformed_size()`, dan yang kedua
+  mengembalikan NaN untuk actor yang tidak punya request ukuran eksplisit —
+  hasilnya semua klik `NaN,NaN` dan enam fase "gagal" padahal produknya benar
+  (diagnostik menunjukkan actor mapped dan teralokasi). Pusat klik diambil dari
+  `get_allocation_box()`.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di

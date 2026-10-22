@@ -38,6 +38,11 @@ const COVER_PX = 44;
 
 const ANIM_MS = 260;
 const FADE_MS = 120;
+// Tarik-mundur ke bezel lebih cepat dari morph antar state: keluar harus terasa
+// sebagai keputusan, bukan sebagai transisi yang sedang berlangsung.
+const STOW_MS = 220;
+const STOW_GRACE_MS = 4000;
+const RAIL_MS = 200;
 const HOLD_MS = 8000;
 const HOLD_HIGH_MS = 20000;
 const TICK_MS = 500;
@@ -73,6 +78,12 @@ export default class NoirIslandExtension extends Extension {
     this._inputOn = null;
     this._coverKey = null;
     this._progW = IDLE_W - 2 * PROG_INSET;
+    // Awal mula: tersimpan di dalam panel. Island tidak pernah "hidup" tanpa
+    // isi; yang pertama membangunkannya adalah trek atau notifikasi.
+    this._stowed = true;
+    this._stowAt = 0;
+    this._shownKey = null;
+    this._shownNotif = null;
     this._fullscreen = false;
     this._tickId = null;
     this._scanEvery = 0;
@@ -84,6 +95,7 @@ export default class NoirIslandExtension extends Extension {
     this._buildIsland();
     Main.layoutManager.addChrome(this._island, {affectsInputRegion: false});
     this._inputOn = false;
+    this._island.visible = false;
     this._place();
 
     this._on(global.display, 'in-fullscreen-changed', () => {
@@ -397,6 +409,55 @@ export default class NoirIslandExtension extends Extension {
     return Math.min(cap, Math.max(base, nat));
   }
 
+  // Isi = sesuatu yang layak dilihat. Trek terpilih (main pun paused, karena
+  // pill JEDA adalah satu-satunya tanda bahwa ada lagu siap dilanjutkan) atau
+  // notifikasi yang sedang tampil / masih mengantre.
+  _hasContent(player) {
+    return !!(player || this._showing || this._pending.length);
+  }
+
+  // Mundur ke dalam panel: tinggi menyusut ke 0 sambil seluruh card memudar,
+  // lalu actor dimatikan. Row-row dihapus dari layout sebelum menyusut karena
+  // Clutter tidak memotong anak — teks setinggi 67 px di dalam card setinggi
+  // 0 px akan mencuat ke atas, ke area panel.
+  _stow() {
+    if (this._stowed || !this._island)
+      return;
+    this._stowed = true;
+    this._stowAt = 0;
+    this._setInput(false);
+    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._progress])
+      row.visible = false;
+    const [x, y] = this._anchor(this._island.width);
+    this._island.ease({
+      height: 0,
+      x,
+      y,
+      opacity: 0,
+      duration: STOW_MS,
+      mode: Clutter.AnimationMode.EASE_IN_QUART,
+      onComplete: () => {
+        // Bisa sudah dibatalkan _unstash sebelum animasi ini selesai.
+        if (this._stowed && this._island)
+          this._island.visible = false;
+      },
+    });
+    log('noir-island: stow');
+  }
+
+  _unstash(w, x, y) {
+    if (!this._stowed)
+      return;
+    this._stowed = false;
+    this._stowAt = 0;
+    const island = this._island;
+    island.visible = true;
+    island.set_opacity(255);
+    island.set_size(w, 0);
+    island.set_position(x, y);
+    log('noir-island: unhide');
+  }
+
   _animateTo(state) {
     const mon = Main.layoutManager.primaryMonitor;
     if (!mon)
@@ -405,6 +466,7 @@ export default class NoirIslandExtension extends Extension {
     const h = SIZE[state][1];
     const [x, y] = this._anchor(w);
     this._progW = Math.max(0, w - 2 * PROG_INSET);
+    this._unstash(w, x, y);
     this._island.ease({
       width: w,
       height: h,
@@ -453,6 +515,11 @@ export default class NoirIslandExtension extends Extension {
       state = 'media';
     }
 
+    // Tidak ada trek dan tidak ada notifikasi: biarkan island tertidur di dalam
+    // panel. Yang membangunkannya hanya _animateTo lewat _unstash.
+    if (this._stowed && !this._hasContent(player))
+      return;
+
     // Baris ditampilkan dan diisi dulu supaya lebar naturalnya terukur dari isi
     // yang benar-benar akan tampil, bukan dari isi state sebelumnya.
     this._pillRow.visible = state === 'idle';
@@ -467,7 +534,10 @@ export default class NoirIslandExtension extends Extension {
     else
       this._fillPill(player);
 
-    if (state !== this._state) {
+    // State bisa sama dengan sebelumnya sementara island sedang tersimpan
+    // (mis. trek berhenti lalu trek lain berhenti): morph tetap jalan supaya
+    // _unstash sempat menurunkan card lagi.
+    if (state !== this._state || this._stowed) {
       this._animateTo(state);
       const asal = state === 'media' ? player.identity
         : state === 'notif' ? String(this._showing?.src?.title ?? '?') : '';
@@ -494,6 +564,14 @@ export default class NoirIslandExtension extends Extension {
 
   _fillMedia(player) {
     const m = player.meta;
+    // Trek berganti saat kartunya sudah di layar: teks diturunkan ke opacity 0
+    // dulu, diisi, lalu dinaikkan — tanpa itu ada satu frame yang mencampur
+    // judul lagu lama dengan artis lagu baru.
+    const kunci = m.key || `${m.title}|${m.artist}`;
+    const ganti = kunci !== this._shownKey;
+    this._shownKey = kunci;
+    if (ganti)
+      this._mediaRow.set_opacity(0);
     this._mTitle.set_text(m.title);
     this._mArtist.set_text(m.artist || player.identity);
     this._mAlbum.set_text(m.album);
@@ -503,6 +581,8 @@ export default class NoirIslandExtension extends Extension {
     this._btnNext.visible = player.canNext !== false;
     this._loadCover(m.art, m.key);
     this._updateProgress(player);
+    if (ganti)
+      this._mediaRow.ease({opacity: 255, duration: FADE_MS, mode: Clutter.AnimationMode.EASE_OUT});
   }
 
   _updateProgress(player) {
@@ -513,7 +593,14 @@ export default class NoirIslandExtension extends Extension {
     this._time.set_text(m.length
       ? `${mmss(elapsed)} / ${mmss(m.length)}` : mmss(elapsed));
     const ratio = m.length ? Math.min(1, Math.max(0, elapsed / m.length)) : 0;
-    this._progressFill.set_size(Math.round(this._progW * ratio), PROGRESS_H);
+    // Tick 500 ms jadi anak tangga kalau isinya di-set mentah. Dibuat ease
+    // sepanjang satu interval tick dengan laju datar: gerakan terasa kontinu
+    // tanpa perlu timer tambahan, dan tick berikutnya menyambung dari sini.
+    this._progressFill.ease({
+      width: Math.round(this._progW * ratio),
+      duration: TICK_MS,
+      mode: Clutter.AnimationMode.LINEAR,
+    });
   }
 
   _fillNotif() {
@@ -532,6 +619,19 @@ export default class NoirIslandExtension extends Extension {
     this._badge.visible = queued > 0;
     this._badge.set_text(queued > 0 ? `+${queued}` : '');
     this._iconBin.set_child(this._notifIcon(src));
+    // Rel rosso adalah gestur masuknya kartu: dialirkan dari tepi atas ke bawah
+    // sekali per notifikasi. Baris ini dipanggil ulang tiap ada kejadian lain,
+    // jadi animasinya dibedakan lewat identitas notifikasinya, tidak tiap render.
+    if (this._shownNotif !== n) {
+      this._shownNotif = n;
+      this._rail.set_pivot_point(0.5, 0);
+      this._rail.set_scale(1, 0);
+      this._rail.ease({
+        scale_y: 1,
+        duration: RAIL_MS,
+        mode: Clutter.AnimationMode.EASE_OUT_QUINT,
+      });
+    }
   }
 
   _notifIcon(src) {
@@ -933,6 +1033,18 @@ export default class NoirIslandExtension extends Extension {
       const player = this._pick();
       if (player)
         this._updateProgress(player);
+    }
+
+    // Jam mundur mulai jalan saat memang tidak ada isi. Celah 1 dtk antara trek
+    // terakhir dan trek berikutnya tidak boleh membuat island kedip masuk-keluar.
+    const bicara = this._hasContent(this._pick());
+    if (bicara || this._stowed) {
+      this._stowAt = 0;
+    } else if (this._stowAt) {
+      if (monoMs() >= this._stowAt)
+        this._stow();
+    } else {
+      this._stowAt = monoMs() + STOW_GRACE_MS;
     }
   }
 }
