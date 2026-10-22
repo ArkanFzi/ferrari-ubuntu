@@ -1,20 +1,25 @@
-/* noir-island@arkan — pill melayang di tengah atas panel.
-   Rosso Corsa #da291c dipakai hanya untuk hal yang sedang terjadi: titik hidup,
-   batang progres, dan tombol Tutup saat disorot. Saat diam island dibiarkan
-   netral supaya tidak bersaing dengan cluster rev-light di kanan panel. */
+/* noir-island@arkan — notch yang menggantung rata di tepi bawah panel.
+   Siluetnya tanpa border: sudut atas kotak karena menempel ke panel, bawah
+   melengkung 22 px. Kedalaman datang dari satu garis rambut di tepi atas dan
+   dari kontras hitam pekat ke panel, bukan dari shadow (St tidak mengenal
+   clip-path/mask, dan shadow hanya bisa digambar di luar box).
+   Rosso Corsa #da291c dipakai hanya untuk hal yang sedang terjadi (TIER 0):
+   titik hidup, rel progres, tombol play, tombol Buka, rail prioritas saat ada
+   notifikasi critical, dan badge antrean. */
 
 .noir-island {
   font-family: Inter;
   font-size: 11px;
   color: #f2f2f2;
-  background-color: rgba(14, 14, 16, 0.93);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 17px;
-  padding: 0 12px;
-  spacing: 9px;
+  background-color: rgba(8, 8, 10, 0.97);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0 0 22px 22px;
 }
 
-.noir-island-pillrow {
+/* Padding horizontal hidup di baris, bukan di card, supaya rel progres dan rail
+   rosso bisa menyentuh tepi card. */
+.noir-island-pad {
+  padding: 0 14px;
   spacing: 8px;
 }
 
@@ -22,15 +27,21 @@
   spacing: 10px;
 }
 
+.noir-island-hairline {
+  width: 1px;
+  background-color: rgba(255, 255, 255, 0.09);
+  margin: 9px 0;
+}
+
 .noir-island-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
-  background-color: rgba(242, 242, 242, 0.28);
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background-color: rgba(242, 242, 242, 0.26);
 }
 
 .noir-island--live {
-  border-color: rgba(218, 41, 28, 0.35);
+  border-top-color: rgba(218, 41, 28, 0.30);
 }
 
 .noir-island--live .noir-island-dot {
@@ -41,46 +52,75 @@
   font-family: Titillium Web;
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 1.6px;
-  color: rgba(242, 242, 242, 0.45);
+  letter-spacing: 1.3px;
+  color: rgba(242, 242, 242, 0.40);
 }
 
-.noir-island-pilltext {
-  font-size: 11px;
-  color: rgba(242, 242, 242, 0.62);
+.noir-island-kicker--hot {
+  color: #da291c;
 }
 
+/* Hierarki datang dari ukuran dan bobot (TIER 1-4), bukan dari warna. */
 .noir-island-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: #f2f2f2;
+  color: #f5f5f5;
 }
 
-.noir-island-sub {
-  font-size: 10px;
+.noir-island-line {
+  font-size: 11px;
   color: rgba(242, 242, 242, 0.60);
+}
+
+.noir-island-faint {
+  font-size: 10px;
+  color: rgba(242, 242, 242, 0.36);
 }
 
 .noir-island-time {
   font-family: Titillium Web;
   font-size: 10px;
-  color: rgba(242, 242, 242, 0.45);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: rgba(242, 242, 242, 0.55);
 }
 
 .noir-island-ctl {
-  spacing: 2px;
+  spacing: 6px;
 }
 
 .noir-island-cover {
-  width: 38px;
-  height: 38px;
-  border-radius: 6px;
-  background-color: rgba(255, 255, 255, 0.06);
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.05);
   background-repeat: no-repeat;
+  color: rgba(242, 242, 242, 0.30);
+}
+
+.noir-island-tile {
+  width: 36px;
+  height: 36px;
+  margin-left: 14px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: rgba(242, 242, 242, 0.72);
+}
+
+.noir-island-rail {
+  width: 3px;
+  /* Berhenti 14 px di atas tepi bawah: lengkungan 22 px sudah masuk sejauh itu,
+     dan St tidak memotong anak mengikuti radius induk. */
+  margin: 14px 0;
+  border-radius: 2px;
+  background-color: #da291c;
 }
 
 .noir-island-prog {
-  background-color: rgba(255, 255, 255, 0.10);
+  height: 3px;
+  /* PROG_INSET di extension.js angka yang sama: lebar isi = lebar card - 2x. */
+  margin: 0 11px;
+  background-color: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
 }
 
@@ -91,12 +131,13 @@
 
 .noir-island-actions {
   spacing: 6px;
+  margin-right: 14px;
 }
 
 .noir-island-btn {
-  padding: 4px 8px;
-  border-radius: 9px;
-  color: rgba(242, 242, 242, 0.78);
+  padding: 4px 9px;
+  border-radius: 11px;
+  color: rgba(242, 242, 242, 0.80);
 }
 
 .noir-island-btn:hover {
@@ -105,6 +146,46 @@
 
 .noir-island-btn:active {
   background-color: rgba(255, 255, 255, 0.14);
+}
+
+.noir-island-btn--round {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.noir-island-btn--round:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.noir-island-btn--play {
+  width: 30px;
+  height: 30px;
+  border-radius: 15px;
+  background-color: #da291c;
+  color: #ffffff;
+}
+
+.noir-island-btn--play:hover {
+  background-color: #ef3b2d;
+}
+
+.noir-island-btn--play:active {
+  background-color: #b81f14;
+}
+
+.noir-island-btn--go {
+  background-color: #da291c;
+}
+
+.noir-island-btn--go .noir-island-btnlabel {
+  color: #ffffff;
+}
+
+.noir-island-btn--go:hover {
+  background-color: #ef3b2d;
 }
 
 .noir-island-btn--stop:hover {
@@ -123,5 +204,8 @@
   font-family: Titillium Web;
   font-size: 9px;
   font-weight: 700;
-  color: #da291c;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background-color: rgba(218, 41, 28, 0.16);
+  color: #ff6a58;
 }

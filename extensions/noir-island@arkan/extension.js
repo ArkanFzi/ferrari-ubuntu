@@ -20,18 +20,24 @@ const MPRIS_ROOT = 'org.mpris.MediaPlayer2';
 const MPRIS_PATH = '/org/mpris/MediaPlayer2';
 const PLAYER_IFACE = 'org.mpris.MediaPlayer2.Player';
 
-const PAD_X = 12;
-const IDLE_W = 196;
-const IDLE_H = 30;
+// Island menggantung rata di bawah panel: tanpa celah, sudut atas kotak, jadi
+// ia dibaca sebagai bagian dari bezel, bukan sebagai toast. Padding horizontal
+// hidup di CSS (.noir-island-pad), kecuali PROG_INSET yang dipakai lagi di JS.
+const IDLE_W = 156;
+const IDLE_H = 34;
 const MEDIA_W = 452;
-const MEDIA_H = 50;
+const MEDIA_H = 64;
 const NOTIF_W = 474;
-const NOTIF_H = 64;
+const NOTIF_H = 72;
 const PROGRESS_H = 3;
-const COVER_PX = 38;
-const TOP_GAP = 10;
+// Sudut bawah card melengkung 22 px; pada tinggi 3 px lengkungan itu sudah
+// masuk 11 px dari tepi, jadi rel progres berhenti di situ supaya tidak
+// mencuat keluar siluet (St tidak punya clip-path/mask).
+const PROG_INSET = 11;
+const COVER_PX = 44;
 
-const ANIM_MS = 240;
+const ANIM_MS = 260;
+const FADE_MS = 120;
 const HOLD_MS = 8000;
 const HOLD_HIGH_MS = 20000;
 const TICK_MS = 500;
@@ -66,7 +72,7 @@ export default class NoirIslandExtension extends Extension {
     this._state = null;
     this._inputOn = null;
     this._coverKey = null;
-    this._progW = IDLE_W - 2 * PAD_X;
+    this._progW = IDLE_W - 2 * PROG_INSET;
     this._fullscreen = false;
     this._tickId = null;
     this._scanEvery = 0;
@@ -154,7 +160,7 @@ export default class NoirIslandExtension extends Extension {
     this._island = island;
 
     // Pill: keadaan diam, dan keadaan jeda (track terakhir masih terbaca di bus).
-    this._pillRow = new St.BoxLayout({style_class: 'noir-island-pillrow'});
+    this._pillRow = new St.BoxLayout({style_class: 'noir-island-pad'});
     this._dot = new St.Widget({
       style_class: 'noir-island-dot',
       y_align: Clutter.ActorAlign.CENTER,
@@ -164,39 +170,64 @@ export default class NoirIslandExtension extends Extension {
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._noEllipsis(this._pillKicker);
-    this._pillText = this._label('noir-island-pilltext');
-    this._pillRow.add_child(this._dot);
-    this._pillRow.add_child(this._pillKicker);
-    this._pillRow.add_child(this._pillText);
-    island.add_child(this._pillRow);
-
-    // Media: artwork, dua baris teks, jam, transport.
-    this._mediaRow = new St.BoxLayout({
-      style_class: 'noir-island-row',
+    this._pillText = this._label('noir-island-line');
+    this._pillBadge = new St.Label({
+      style_class: 'noir-island-badge',
+      y_align: Clutter.ActorAlign.CENTER,
       visible: false,
     });
-    this._cover = new St.Widget({style_class: 'noir-island-cover'});
+    this._pillRow.add_child(this._dot);
+    this._pillRow.add_child(this._pillKicker);
+    this._pillRow.add_child(this._hairline());
+    this._pillRow.add_child(this._pillText);
+    this._pillRow.add_child(this._pillBadge);
+    island.add_child(this._pillRow);
+
+    // Media: artwork, tiga baris teks (judul/artis/album), transport.
+    this._mediaRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      visible: false,
+    });
+    this._cover = new St.Bin({
+      style_class: 'noir-island-cover',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.FILL,
+    });
+    // Tile artwork dibiarkan berisi ikon sampai ada art sungguhan, supaya card
+    // tidak pernah membuka dengan kotak kosong.
+    this._coverIcon = new St.Icon({
+      icon_name: 'audio-x-generic-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.FILL,
+    });
+    this._cover.add_child(this._coverIcon);
     const col = new St.BoxLayout({
       vertical: true,
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._mTitle = this._label('noir-island-title');
-    this._mSub = this._label('noir-island-sub');
+    this._mArtist = this._label('noir-island-line');
+    this._mAlbum = this._label('noir-island-faint');
     col.add_child(this._mTitle);
-    col.add_child(this._mSub);
+    col.add_child(this._mArtist);
+    col.add_child(this._mAlbum);
 
     this._time = new St.Label({
       style_class: 'noir-island-time',
       y_align: Clutter.ActorAlign.CENTER,
     });
+    this._noEllipsis(this._time);
     this._btnPrev = this._iconButton('media-skip-backward-symbolic',
-      () => this._transport('Previous'));
+      () => this._transport('Previous'), 'noir-island-btn--round');
     this._btnPlay = this._iconButton('media-playback-pause-symbolic',
-      () => this._transport('PlayPause'));
+      () => this._transport('PlayPause'),
+      'noir-island-btn--round noir-island-btn--play');
     this._btnNext = this._iconButton('media-skip-forward-symbolic',
-      () => this._transport('Next'));
+      () => this._transport('Next'), 'noir-island-btn--round');
     const ctl = new St.BoxLayout({style_class: 'noir-island-ctl'});
+    ctl.add_child(this._hairline());
     ctl.add_child(this._time);
     ctl.add_child(this._btnPrev);
     ctl.add_child(this._btnPlay);
@@ -215,12 +246,19 @@ export default class NoirIslandExtension extends Extension {
     this._progress.add_child(this._progressFill);
     island.add_child(this._progress);
 
-    // Notifikasi: ikon sumber, tiga baris teks, badge antrean, dua tombol.
+    // Notifikasi: rail rosso, ikon sumber dalam tile, tiga baris teks, tombol.
+    // Baris ini sengaja tidak memakai noir-island-pad supaya rail dan tile
+    // menyentuh tepi card; gantinya tile dan tombol membawa margin sendiri.
     this._notifRow = new St.BoxLayout({
       style_class: 'noir-island-row',
       visible: false,
     });
-    this._iconBin = new St.Bin({y_align: Clutter.ActorAlign.CENTER});
+    this._rail = new St.Widget({style_class: 'noir-island-rail'});
+    this._iconBin = new St.Bin({
+      style_class: 'noir-island-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.FILL,
+    });
     const ncol = new St.BoxLayout({
       vertical: true,
       x_expand: true,
@@ -229,7 +267,7 @@ export default class NoirIslandExtension extends Extension {
     this._nKicker = new St.Label({style_class: 'noir-island-kicker'});
     this._noEllipsis(this._nKicker);
     this._nTitle = this._label('noir-island-title');
-    this._nBody = this._label('noir-island-sub');
+    this._nBody = this._label('noir-island-line');
     ncol.add_child(this._nKicker);
     ncol.add_child(this._nTitle);
     ncol.add_child(this._nBody);
@@ -241,16 +279,25 @@ export default class NoirIslandExtension extends Extension {
     });
     this._btnClose = this._textButton('Tutup', () => this._dismiss(),
       'noir-island-btn--stop');
-    this._btnOpen = this._textButton('Buka', () => this._openTarget());
+    this._btnOpen = this._textButton('Buka', () => this._openTarget(),
+      'noir-island-btn--go');
     const btns = new St.BoxLayout({style_class: 'noir-island-actions'});
     btns.add_child(this._badge);
     btns.add_child(this._btnClose);
     btns.add_child(this._btnOpen);
 
+    this._notifRow.add_child(this._rail);
     this._notifRow.add_child(this._iconBin);
     this._notifRow.add_child(ncol);
     this._notifRow.add_child(btns);
     island.add_child(this._notifRow);
+  }
+
+  _hairline() {
+    return new St.Widget({
+      style_class: 'noir-island-hairline',
+      y_align: Clutter.ActorAlign.FILL,
+    });
   }
 
   _label(className) {
@@ -273,9 +320,9 @@ export default class NoirIslandExtension extends Extension {
     return this._ellipsize(label, Pango.EllipsizeMode.NONE);
   }
 
-  _iconButton(iconName, clicked) {
+  _iconButton(iconName, clicked, extraClass) {
     const btn = new St.Button({
-      style_class: 'noir-island-btn',
+      style_class: extraClass ? `noir-island-btn ${extraClass}` : 'noir-island-btn',
       child: new St.Icon({icon_name: iconName, icon_size: 16}),
       y_align: Clutter.ActorAlign.CENTER,
     });
@@ -302,14 +349,22 @@ export default class NoirIslandExtension extends Extension {
     this._btnPlay.set_child(new St.Icon({icon_name: name, icon_size: 16}));
   }
 
+  // Sudut kiri-atas card untuk satu lebar. Island menggantung rata di tepi
+  // bawah panel, bukan melayang di bawahnya.
+  _anchor(w) {
+    const mon = Main.layoutManager.primaryMonitor;
+    return [
+      Math.round(mon.x + (mon.width - w) / 2),
+      Math.round(mon.y + (Main.panel.height || 0)),
+    ];
+  }
+
   _place() {
     const mon = Main.layoutManager.primaryMonitor;
     if (!mon || !this._island)
       return;
-    const w = this._island.width || IDLE_W;
-    this._island.set_position(
-      Math.round(mon.x + (mon.width - w) / 2),
-      Math.round(mon.y + (Main.panel.height || 0) + TOP_GAP));
+    const [x, y] = this._anchor(this._island.width || IDLE_W);
+    this._island.set_position(x, y);
   }
 
   // Island hanya boleh merebut klik saat melebar. Input region chrome ditentukan
@@ -326,7 +381,8 @@ export default class NoirIslandExtension extends Extension {
 
   // Lebar state diambil dari isi teksnya, bukan dari angka tetap: judul panjang
   // dan label tombol tidak boleh terpotong. Konstanta SIZE jadi batas bawah,
-  // 70% monitor jadi batas atas.
+  // 70% monitor jadi batas atas. Padding sudah ikut terhitung karena yang
+  // diukur lebar natural barisnya sendiri, bukan isi di dalamnya.
   _widthFor(state) {
     const base = SIZE[state][0];
     const row = state === 'media' ? this._mediaRow
@@ -336,7 +392,7 @@ export default class NoirIslandExtension extends Extension {
     const [, nat] = row.get_preferred_width(SIZE[state][1]);
     const mon = Main.layoutManager.primaryMonitor;
     const cap = mon ? Math.round(mon.width * 0.7) : base;
-    return Math.min(cap, Math.max(base, nat + 2 * PAD_X));
+    return Math.min(cap, Math.max(base, nat));
   }
 
   _animateTo(state) {
@@ -345,17 +401,38 @@ export default class NoirIslandExtension extends Extension {
       return;
     const w = this._widthFor(state);
     const h = SIZE[state][1];
-    this._progW = w - 2 * PAD_X;
+    const [x, y] = this._anchor(w);
+    this._progW = Math.max(0, w - 2 * PROG_INSET);
     this._island.ease({
       width: w,
       height: h,
-      x: Math.round(mon.x + (mon.width - w) / 2),
-      y: Math.round(mon.y + (Main.panel.height || 0) + TOP_GAP),
+      x,
+      y,
       duration: ANIM_MS,
-      mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+      mode: Clutter.AnimationMode.EASE_OUT_QUINT,
     });
     this._progress.set_size(this._progW, PROGRESS_H);
+    this._fadeTo(state);
     this._setInput(state !== 'idle');
+  }
+
+  // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
+  // baru dinaikkan opacity-nya telat, setelah card hampir selesai melebar —
+  // pola island yang tumbuh dulu baru menampilkan isinya.
+  _fadeTo(state) {
+    const rows = state === 'media' ? [this._mediaRow, this._progress]
+      : state === 'notif' ? [this._notifRow] : [this._pillRow];
+    for (const row of rows) {
+      if (!row)
+        continue;
+      row.set_opacity(0);
+      row.ease({
+        opacity: 255,
+        delay: Math.round(ANIM_MS * 0.35),
+        duration: FADE_MS,
+        mode: Clutter.AnimationMode.EASE_OUT,
+      });
+    }
   }
 
   // ------------------------------------------------------------------ render
@@ -405,15 +482,20 @@ export default class NoirIslandExtension extends Extension {
   _fillPill(player) {
     const resting = player?.meta?.title ? player : null;
     this._pillKicker.set_text(resting ? 'JEDA' : 'DIAM');
-    this._pillText.set_text(resting
-      ? `${resting.meta.title} — ${resting.meta.artist || resting.identity}`
-      : 'tidak ada yang bunyi');
+    this._pillText.set_text(resting ? resting.meta.title : 'sunyi');
+    // Antrean tetap terlihat saat island diam: notifikasi yang tertahan
+    // (fullscreen / DND) tidak boleh hilang tanpa jejak.
+    const queued = this._pending.length;
+    this._pillBadge.visible = queued > 0;
+    this._pillBadge.set_text(queued > 0 ? `+${queued}` : '');
   }
 
   _fillMedia(player) {
     const m = player.meta;
     this._mTitle.set_text(m.title);
-    this._mSub.set_text([m.artist, m.album].filter(Boolean).join(' · '));
+    this._mArtist.set_text(m.artist || player.identity);
+    this._mAlbum.set_text(m.album);
+    this._mAlbum.visible = !!m.album;
     this._setPlayIcon(player.status);
     this._btnPrev.visible = player.canPrev !== false;
     this._btnNext.visible = player.canNext !== false;
@@ -434,7 +516,14 @@ export default class NoirIslandExtension extends Extension {
 
   _fillNotif() {
     const {src, n} = this._showing;
+    const critical = n.urgency >= Urgency.CRITICAL;
     this._nKicker.set_text(String(src.title || 'Notifikasi').toUpperCase());
+    // Nama aplikasi jadi merah hanya kalau urgensi critical: rosso penanda
+    // yang berarti (TIER 0), bukan hiasan.
+    if (critical)
+      this._nKicker.add_style_class_name('noir-island-kicker--hot');
+    else
+      this._nKicker.remove_style_class_name('noir-island-kicker--hot');
     this._nTitle.set_text(n.title || '');
     this._nBody.set_text(this._oneLine(n.body || '', BODY_MAX));
     const queued = this._pending.length;
@@ -446,12 +535,12 @@ export default class NoirIslandExtension extends Extension {
   _notifIcon(src) {
     const ic = src?.icon;
     if (ic instanceof Gio.Icon)
-      return new St.Icon({gicon: ic, icon_size: 26});
+      return new St.Icon({gicon: ic, icon_size: 22});
     if (typeof ic === 'string' && ic)
-      return new St.Icon({icon_name: ic, icon_size: 26});
+      return new St.Icon({icon_name: ic, icon_size: 22});
     return new St.Icon({
       icon_name: 'preferences-system-notifications-symbolic',
-      icon_size: 26,
+      icon_size: 22,
     });
   }
 
@@ -709,6 +798,7 @@ export default class NoirIslandExtension extends Extension {
   _paintCover(path) {
     if (!this._cover)
       return;
+    this._coverIcon.visible = !path;
     this._cover.set_style(path
       ? `background-image: url("${path}");`
       : 'background-image: none;');

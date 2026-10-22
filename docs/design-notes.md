@@ -189,6 +189,36 @@ Dua keputusan bentuk:
   semua ambang (hold 8 s / 20 s, antrean 8, durasi 240 ms) masih konstanta di
   puncak file. Yang bisa diubah pengguna masuk belakangan.
 
+### Revisi: island menggantung, bukan mengambang
+
+Pil bulat penuh dengan celah di bawah panel ternyata terbaca sebagai toast:
+ia datang, memanggil mata, lalu pergi. Yang dipakai sekarang adalah siluet
+**notch** — rata di bawah panel, sudut atas kotak, hanya sudut bawah yang
+melengkung (`border-radius: 0 0 22px 22px`), sehingga island jadi perpanjangan
+bezel dan bukan permukaan baru yang harus ditafsir ulang tiap muncul. Akibat
+teknisnya: `TOP_GAP`/`PAD_X` dihapus, posisi y selalu
+`monitor.y + panel.height` (`_anchor()`), dan konstanta lebar berubah makna dari
+"lebar total" jadi "batas bawah" karena padding horizontal pindah ke CSS
+(`.noir-island-pad`) — jadi `_widthFor()` memakai lebar natural apa adanya.
+Yang dibatalkan: pil mengambang, sudut atas melengkung, pemusatan isi lewat
+padding JS.
+
+Tiga hal yang hanya ketahuan dari rig saat bentuk ini dikerjakan:
+
+- **`border-radius` empat nilai dihormati St**, jadi notch tidak butuh trik.
+  `box-shadow` dengan blur 0 juga jalan, dan itu yang dipakai untuk garis rambut
+  antar kolom (`.noir-island-hairline`, `width: 1px`) alih-alih border, karena
+  border memakan box dan menggeser alignment teks.
+- **St tidak punya `clip-path` maupun `mask`, dan anak tidak dipotong oleh radius
+  induk.** Batang progres setinggi 3 px yang melebar sampai tepi card akan
+  mencuat keluar lengkungan. Lengkungan 22 px pada tinggi 3 px sudah masuk
+  11 px dari tepi, maka `PROG_INSET = 11` (JS) dan `margin: 0 11px` (CSS) adalah
+  angka yang sama di dua tempat — kalau radius card diubah, keduanya harus ikut.
+  Rel kiri kartu notifikasi memakai versi dirinya sendiri: `margin: 14px 0`.
+- **Ukuran nyata tiap state** terukur di rig, semuanya di `y=32` (= tinggi
+  panel): diam 156×34, `JEDA` 197×34, media 452×67, notifikasi 474×72. Tingginya
+  bukan tebakan — media 64 ditambah batang progres 3.
+
 Subjek uji bukan pemutar asli: rhythmbox mengirim notifikasinya sendiri (langsung
 merebut keadaan media) dan dua kali SIGSEGV di rig. Yang dipakai adalah service
 MPRIS palsu yang punya nama di bus, metadata lengkap, dan mengirim
