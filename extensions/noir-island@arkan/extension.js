@@ -119,6 +119,9 @@ function mmss(sec) {
 
 export default class NoirIslandExtension extends Extension {
   enable() {
+    // Sakel mati. Hanya disable() yang menaikkannya, dan begitu naik, tidak ada
+    // jalur lagi — termasuk re-entri dari shell — yang boleh menulis bannerBlocked.
+    this._dead = false;
     this._players = new Map();
     this._pending = [];
     this._showing = null;
@@ -200,9 +203,18 @@ export default class NoirIslandExtension extends Extension {
   }
 
   disable() {
-    // Statement pertama, sebelum apa pun yang bisa melempar: satu-satunya
+    // Sakel mati lebih dulu dari apa pun. Melepas blok di bawah bisa masuk
+    // kembali ke shell: setter bannerBlocked memicu _updateState, yang langsung
+    // menampilkan notif antrean, yang menaikkan Source.count, yang memanggil
+    // handler kita, yang menggambar ulang — dan blokir lagi. Terbukti di rig:
+    // 27 dtk sesudah release flag sudah true kembali dan tidak ada pemiliknya
+    // lagi sampai logout.
+    this._dead = true;
+    // Statement berikutnya, sebelum apa pun yang bisa melempar: satu-satunya
     // jaminan jam panel kembali kalau island sedang memakannya.
     this._setActive(false);
+    // Sama untuk banner: jangan pernah meninggalkan shell dalam keadaan diblok.
+    this._blockBanner(false);
     this._armOutside(false);
     if (this._tickId)
       GLib.source_remove(this._tickId);
@@ -563,6 +575,29 @@ export default class NoirIslandExtension extends Extension {
     }
   }
 
+  // Banner shell dan kartu island adalah dua wajah dari satu notifikasi. Selama
+  // island sanggup menampilkannya, banner diblok lewat knob resmi shell sendiri —
+  // MessageTray.bannerBlocked, setter publik yang dipakai panel.js:972 untuk menu
+  // yang searah banner — bukan dengan menyembunyikan actor diam-diam. Begitu
+  // island kalah (fullscreen atau DND) banner kembali seperti semula.
+  _syncBannerBlock() {
+    // Sesudah disable(), flag bukan milik kita lagi.
+    if (this._dead)
+      return;
+    // panel.js menulis flag yang sama buta saat menu dibuka/ditutup; selama ada
+    // menu terbuka keputusan bukan kita yang boleh menang.
+    if (Main.panel.menuManager?.activeMenu)
+      return;
+    this._blockBanner(!this._fullscreen && !this._dndOff());
+  }
+
+  // Setter-nya sendiri idempoten (bandingkan lalu pulang), jadi memanggil ini
+  // tiap tick tidak memicu _updateState() berulang.
+  _blockBanner(on) {
+    if (Main.messageTray)
+      Main.messageTray.bannerBlocked = on;
+  }
+
   // Hover diuji per poll, tidak pernah lewat sinyal: captured-event MOTION di
   // X11 tidak terkirim ke stage saat klien memegang pointer grab, dan track-input
   // tidak tersedia di Wayland.
@@ -865,8 +900,12 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _render() {
-    if (!this._island)
+    if (!this._island || this._dead)
       return;
+    // Keputusan banner didahulukan dari keputusan kartu: selama island sanggup
+    // jadi wajah notifikasi, shell tidak boleh menampilkan yang kedua — dan itu
+    // berlaku bahkan ketika island sedang tertidur.
+    this._syncBannerBlock();
     const player = this._pick();
     // Tidak ada trek, tidak ada notifikasi, tidak ada pointer: biarkan island
     // tertidur di dalam panel. Yang membangunkannya hanya _animateTo lewat
@@ -1524,6 +1563,11 @@ export default class NoirIslandExtension extends Extension {
       n: item.n,
       until: monoMs() + hold,
     };
+    // Suara dulu dimainkan messageTray lewat _updateShowingNotification(); begitu
+    // banner diblok jalur itu tidak pernah jalan lagi, dan satu-satunya pemanggil
+    // playSound() di shell 46 adalah sana. Island yang mengambil alih tampilnya
+    // notifikasi, jadi ia juga yang mengambil alih suaranya.
+    item.n.playSound();
   }
 
   _dismiss() {
@@ -1547,6 +1591,10 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _tick() {
+    // panel.js menulis bannerBlocked buta saat menu searah banner ditutup, jadi
+    // blok kita bisa hilang tanpa ada kejadian yang memberi tahu island. Tick
+    // 500 dtk adalah cara termurah untuk tidak pernah kalah balapan dengan shell.
+    this._syncBannerBlock();
     if (++this._scanEvery >= SCAN_TICKS) {
       this._scanEvery = 0;
       this._scan();

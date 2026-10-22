@@ -504,6 +504,64 @@ Ubuntu duduk di **tengah** panel, persis di bawah island, jadi wilayah ukur 660-
 baris** log: probe AT-SPI memakan beberapa detik dan baseline kumulatif sempat
 menelan kejadian yang sedang ditunggu (seek dilaporkan GAGAL padahal log-nya ada).
 
+### Satu wajah untuk satu notifikasi
+
+Gejalanya bukan bug geometri: notifikasi yang sama keluar dua kali — banner shell
+dan kartu island. Island adalah wajah yang dipilih, jadi banner shell diblok lewat
+knob resmi milik shell sendiri, `MessageTray.bannerBlocked` (setter publik,
+messageTray.js:828; pemakai preseden panel.js:972), bukan dengan menyembunyikan
+actor diam-diam.
+
+- **Kapan diblok.** Selama island sanggup jadi wajah: bukan fullscreen dan bukan
+  DND (`_dndOff()` membaca `org.gnome.desktop.notifications show-banners`).
+  `_syncBannerBlock()` dipanggil di puncak `_render()` **dan** `_tick()` (500 ms),
+  karena panel.js menulis flag yang sama secara buta saat menu searah banner
+  dibuka/ditutup — tanpa poll, blok bisa hilang tanpa ada kejadian yang memberi
+  tahu island. Poll kalah cepatnya tidak masalah; tick berikutnya membereskan.
+- **Suara ikut pindah.** `playSound()` hanya dipanggil di messageTray.js:1147, di
+  dalam `_updateShowingNotification()`; begitu banner diblok jalur itu tidak pernah
+  jalan lagi. Island yang mengambil alih tampilnya notifikasi mengambil alih
+  suaranya (`item.n.playSound()` di `_surface`). Yang terbukti dipanggil; belum
+  didengar dengan telinga.
+- **Antrean bisa memutar ulang.** Notif yang datang saat diblok tetap masuk
+  `_notificationQueue` (maks 3) dan banner-nya muncul begitu blok dilepas.
+
+**Bug jalur-lepas, dan akar yang hanya kelihatan kalau di-trace.** `disable()`
+melepas blok (statement ke-2, supaya throw di tengah-tengah tidak meninggalkan
+shell dalam keadaan diblok). Tapi setter itu sendiri sinkron masuk kembali ke
+shell: `bannerBlocked=false` → `_updateState()` → `_showNotification()` untuk notif
+antrean → `Source.count` naik → handler `notify::count` kita (extension.js:1461)
+masih terhubung dan `_island` belum null → `_render()` → `_syncBannerBlock()` →
+**blokir lagi**, 27 ms sesudah release, dan sejak itu flag tidak punya pemilik
+sampai logout. Rig membuktikannya dengan stack, bukan dengan pixel:
+
+```
+PROBE SET blocked=false  stack=_blockBanner@:585 <= disable@:207 <= _callExtensionDisable@extensionSystem.js:218
+PROBE SET blocked=true   stack=_blockBanner@:585 <= _syncBannerBlock@:578 <= _render@:895
+                              <= _watch/ids<@:1461 <= countUpdated@messageTray.js:537
+```
+
+Fix-nya satu sakel: `_dead` di `enable()` = false, statement **pertama** `disable()`
+= true, diperiksa di `_syncBannerBlock()` dan di gerbang `_render()`. Jadi urutan
+lama (lepas sedini mungkin) tetap tahan-throw, dan tidak ada jalur — termasuk
+re-entri dari shell — yang bisa menulis `blocked=true` sesudah island mati.
+
+**Cara ukurnya, karena pixel saja menipu.** Kontrol pertama: rig tanpa extension
+apa pun benar-benar menampilkan banner (47197 piksel terang vs baseline 2093), jadi
+angka HILANG di uji-lepas bukan butanya probe. Lalu probe rig-only
+`noir-probe@rig` yang membungkus `_onNotificationRequestBanner` /
+`_showNotification` dan men-trace *setter* `bannerBlocked` beserta stack — handler
+palsu memanggil yang asli **terlebih dulu**, supaya probe tidak mengubah jalur
+yang diukurnya. Sesudah fix: satu `SET blocked=false` saat disable, **nol**
+`SET blocked=true` sesudahnya, tray berakhir `visible=true`, dan
+`BANNER-sesudah-normal: ADA (47486)` / `BANNER-sesudah-kritis: ADA (47486)`;
+`BANNER-saat-island` tetap HILANG (2378). Tiga jebakan probe yang ketemu di
+jalan: `import Main from 'resource:///...ui/main.js'` melempar
+*ambiguous indirect export* (harus `import * as Main`), `global.log` tidak ada di
+shell 46 (pakai `log()` global GJS), dan `gnome-extensions disable` baru menyentuh
+shell ~10 dtk sesudah dipanggil karena service `org.gnome.Shell.Extensions`
+diaktivasi lewat D-Bus — jangan menuduh race kalau timestamp terlihat aneh.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di
