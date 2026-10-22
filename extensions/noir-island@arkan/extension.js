@@ -423,12 +423,12 @@ export default class NoirIslandExtension extends Extension {
     return Math.min(cap, Math.max(base, Number.isFinite(nat) ? nat : base));
   }
 
-  // Isi = sesuatu yang sedang terjadi. Trek yang benar-benar berbunyi, atau
-  // notifikasi yang tampil / masih mengantre. Trek paused BUKAN isi: island yang
-  // tetap nempel berjam-jam setelah lagu berhenti adalah ornamen, dan pill JEDA
-  // tidak berarti apa-apa kalau ia tidak pernah pergi.
+  // Isi = sesuatu yang boleh tampil (aturan ada di _decideState) plus notifikasi
+  // yang masih mengantre, karena pill +N menahan jejaknya. Trek paused BUKAN
+  // isi: island yang tetap nempel berjam-jam setelah lagu berhenti adalah
+  // ornamen, dan pill JEDA tidak berarti apa-apa kalau ia tidak pernah pergi.
   _hasContent(player) {
-    return !!(player?.status === 'Playing' || this._showing || this._pending.length);
+    return this._decideState(player) !== 'idle' || this._pending.length > 0;
   }
 
   // Mundur ke dalam panel: tinggi menyusut ke 0 sambil seluruh card memudar,
@@ -523,19 +523,26 @@ export default class NoirIslandExtension extends Extension {
 
   // ------------------------------------------------------------------ render
 
+  // Satu-satunya tempat yang memutuskan state mana yang BOLEH tampil. Aturan
+  // "isi" di _hasContent() harus dibaca dari sini, bukan dari daftarnya sendiri:
+  // dulu trek Playing di bawah jendela fullscreen ditolak di sini tapi tetap
+  // dihitung isi, sehingga jam mundur stow tidak pernah mulai dan island duduk
+  // sebagai pill sampai treknya berhenti.
+  _decideState(player) {
+    if (this._showing && !this._dndOff()) {
+      const critical = this._showing.n.urgency >= Urgency.CRITICAL;
+      return !this._fullscreen || critical ? 'notif' : 'idle';
+    }
+    if (player && player.status === 'Playing' && !this._fullscreen)
+      return 'media';
+    return 'idle';
+  }
+
   _render() {
     if (!this._island)
       return;
     const player = this._pick();
-    let state = 'idle';
-
-    if (this._showing && !this._dndOff()) {
-      const critical = this._showing.n.urgency >= Urgency.CRITICAL;
-      if (!this._fullscreen || critical)
-        state = 'notif';
-    } else if (player && player.status === 'Playing' && !this._fullscreen) {
-      state = 'media';
-    }
+    const state = this._decideState(player);
 
     // Tidak ada trek dan tidak ada notifikasi: biarkan island tertidur di dalam
     // panel. Yang membangunkannya hanya _animateTo lewat _unstash.

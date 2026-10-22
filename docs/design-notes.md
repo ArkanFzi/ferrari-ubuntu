@@ -393,6 +393,46 @@ morph benar-benar jalan. Yang dilakukan sekarang:
   ulang selalu HIJAU; yang perlu diperbaiki adalah harness-nya (retry per klik),
   bukan produknya.
 
+### Isi punya dua definisi: fullscreen menahan island tanpa pernah menampilkannya
+
+Gejala di sesi live: trek Playing (YouTube lewat MPRIS Chrome) membuat island
+bangun **2 m 21 s** sebagai pill idle — `idle 375x34` 19:29:50.989, dan `stow`
+baru muncul 19:32:12, tepat saat treknya di-pause. Island tidak menampilkan
+apa pun yang berhak ditampilkan, tapi juga tidak mau tidur.
+
+Akar: `_render()` dan `_hasContent()` masing-masing punya daftar syarat sendiri.
+`_render()` menolak state `media` selama `_fullscreen` (kartu memang sengaja
+kalah oleh video), `_hasContent()` hanya bertanya `status === 'Playing'`. Jadi
+di bawah fullscreen jawabannya bertolak belakang: tidak ada yang boleh tampil,
+tetap dihitung "ada isi" → `_stowAt` di-reset tiap tick dan jam mundur tidak
+pernah mulai. Rantai inferensinya tertutup rapat: state `idle` terdokumentasi
+sambil player dilaporkan `Playing` cuma bisa dijelaskan oleh `_fullscreen`, dan
+DND tersingkir karena `show-banners=true`.
+
+Perbaikannya satu bentuk: keputusan state dipindah ke `_decideState(player)`
+dan `_hasContent()` didefinisikan darinya — `!== 'idle' || _pending.length`
+(usantre tetap dihitung karena pill `+N` memang menahan jejaknya). Sekarang
+tidak ada lagi cara untuk menambahkan pengecualian di satu sisi dan lupa di
+sisi lain.
+
+Bukti, rig Xephyr `:9` dengan pemain MPRIS palsu + jendela `xclock` yang
+dijadikan fullscreen lewat `wmctrl -b add,fullscreen`:
+
+- kode lama (`5bdc02a`): `idle` 19:46:28.132, **tidak ada `stow` sampai
+  fullscreen dilepas** 19:46:41.288 → `HASIL=MERAH`.
+- kode baru: `idle` 19:46:01.810 → `stow` 19:46:06.121 (4,3 dtk = grace + tick),
+  lalu `unhide` + `media <- Uji MPRIS` begitu fullscreen lepas, dan jalur
+  pause→stow / play→unhide tetap hijau → `HASIL=HIJAU`, `error: 0`.
+
+Alat ukurnya hampir menelan korban: `dconf write` **tidak** diisolasi oleh
+`XDG_CONFIG_HOME` karena tulisan diedarkan lewat service `ca.desrt.dconf` di
+session bus yang sedang jalan — seed rig sempat menimpa `enabled-extensions`
+milik sesi live dan seluruh extension lain ikut dimatikan. Daftarnya dipulihkan
+dari jejak di journal (`ubuntu-dock` tercatat lewat `_callExtensionDisable`)
+dan dari kunci extension yang sudah dimodifikasi (`just-perfection/panel-size`,
+`tiling-assistant/active-window-hint-color` merah Ferrari, `appindicator/icon-size`).
+Harness sekarang menulis seed di dalam `dbus-run-session` sendiri.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di
