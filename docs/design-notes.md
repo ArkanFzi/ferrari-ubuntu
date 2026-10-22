@@ -324,6 +324,36 @@ state saja, dan Ubuntu memblokir dua jalur pintas: `org.gnome.Shell.Eval`
   ikut dicetak di setiap baris state (`... 452x67 @574,32 panel=32`) supaya
   sesi live bisa dihakimi dari journal saja.
 
+### Jam kartu media: posisi harus ditanya, bukan dihitung
+
+Kartu media live menampilkan **"44:17 / 4:04"** sementara `Position` di bus
+adalah 1:38. Bukan salah Spotify: `_updateProgress()` menghitung
+`pos + rate * (now - posAt)`, dan `pos`/`posAt` hanya diperbarui saat
+`PropertiesChanged` membawa `Position` — yang **tidak pernah dikirim** player
+mana pun (posisi bukan properti yang diumumkan, MPRIS menyuruh pemakai
+menanyakannya). Jadi `posAt` membeku sejak player pertama ditemukan dan jam
+dinding — termasuk seluruh waktu paused — ikut dihitung sebagai waktu play.
+
+- **Sampel per tick, lewat `Get` async.** `_samplePosition()` memanggil
+  `org.freedesktop.DBus.Properties.Get` untuk `Position` hanya saat state
+  `media` dan status `Playing`; guard `entry.posQuery` menahan antrean kalau
+  player lambat, dan jalur async membuat satu tick 500 dtk tidak pernah
+  memblokir loop shell (jalur `call_sync` yang sudah ada tetap 400 dtk).
+- **Resume wajib menulis ulang titik acuan.** Perubahan `PlaybackStatus`
+  langsung set `posAt = monoMs()` lalu men-sampel, supaya jeda 20 dtk tidak
+  pernah muncul sebagai 20 dtk waktu play setelah lanjut.
+- **Clamp ke panjang trek.** Dead reckoning boleh meleset satu tick, tapi
+  kartu tidak boleh mengklaim sudah lewat akhir lagu.
+- **Alat ukurnya: teks label, bukan pixel.** `timelabel.py` membaca teks label
+  waktu island lewat AT-SPI di dalam rig, lalu harness membandingkannya dengan
+  `Position` asli di bus: 66 dtk vs 66 dtk setelah jeda 20 dtk, dan bertambah
+  11 dtk dalam 10 dtk berikutnya. Player palsu di rig ikut diubah jadi benar-
+  benar berjalan (`posNow()`), karena dengan posisi statis tes ini tidak bisa
+  membedakan sampel nyata dari hitungan dinding.
+- **Label mana yang dibaca.** Pola pencocokan harus menuntut `m:ss / m:ss`;
+  tanpa bagian total, probe menjemput label `0:00` milik shell lain dan
+  menyimpulkan kartu yang benar jadi salah.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di

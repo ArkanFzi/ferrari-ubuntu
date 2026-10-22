@@ -596,9 +596,12 @@ export default class NoirIslandExtension extends Extension {
 
   _updateProgress(player) {
     const m = player.meta;
-    const elapsed = player.status === 'Playing'
+    let elapsed = player.status === 'Playing'
       ? player.pos + player.rate * (monoMs() - player.posAt) / 1000
       : player.pos;
+    // Dead reckoning tidak boleh melampaui panjang trek: sampel Position bisa
+    // tertinggal satu tick, dan "44:17 / 4:04" lebih buruk daripada diam di 4:04.
+    elapsed = Math.max(0, m.length ? Math.min(elapsed, m.length) : elapsed);
     this._time.set_text(m.length
       ? `${mmss(elapsed)} / ${mmss(m.length)}` : mmss(elapsed));
     const ratio = m.length ? Math.min(1, Math.max(0, elapsed / m.length)) : 0;
@@ -720,6 +723,7 @@ export default class NoirIslandExtension extends Extension {
       identity: name.slice(MPRIS_PREFIX.length),
       pos: 0,
       posAt: monoMs(),
+      posQuery: false,
       rate: 1,
       seen: monoMs(),
     };
@@ -769,9 +773,44 @@ export default class NoirIslandExtension extends Extension {
     }
   }
 
+  // Posisi adalah satu-satunya properti MPRIS yang tidak pernah diumumkan lewat
+  // PropertiesChanged, jadi harus ditanya. Ambil satu per pemain: guard posQuery
+  // menahan antrean bila player lambat, dan jalur async supaya satu tick tidak
+  // pernah memblokir loop shell.
+  _samplePosition(entry) {
+    if (!entry || entry.posQuery)
+      return;
+    entry.posQuery = true;
+    Gio.DBus.session.call(entry.name, MPRIS_PATH, PROPS_IFACE, 'Get',
+      new GLib.Variant('(ss)', [PLAYER_IFACE, 'Position']),
+      new GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, DBUS_TIMEOUT_MS,
+      null, (conn, res) => {
+        entry.posQuery = false;
+        let pos;
+        try {
+          pos = this._val(conn.call_finish(res).get_child_value(0));
+        } catch (e) {
+          return;
+        }
+        if (typeof pos !== 'number' || !isFinite(pos) || pos < 0)
+          return;
+        entry.pos = pos / 1e6;
+        entry.posAt = monoMs();
+        if (this._state === 'media' && this._pick() === entry && this._island)
+          this._updateProgress(entry);
+      });
+  }
+
   _applyProps(entry, props) {
     const status = this._val(props.PlaybackStatus);
-    if (status)
+    if (status && status !== entry.status) {
+      entry.status = status;
+      // Titik acuan ditulis ulang saat status berubah: tanpa ini resume
+      // melanjutkan jam dari posisi terakhir yang sempat terbaca, dan jeda
+      // panjang ikut terhitung sebagai waktu play.
+      entry.posAt = monoMs();
+      this._samplePosition(entry);
+    } else if (status)
       entry.status = status;
     if (props.Position !== undefined) {
       entry.pos = this._val(props.Position) || 0;
@@ -1052,8 +1091,11 @@ export default class NoirIslandExtension extends Extension {
       this._render();
     } else if (this._state === 'media') {
       const player = this._pick();
-      if (player)
+      if (player) {
+        if (player.status === 'Playing')
+          this._samplePosition(player);
         this._updateProgress(player);
+      }
     }
 
     // Jam mundur mulai jalan saat memang tidak ada isi. Celah 1 dtk antara trek
