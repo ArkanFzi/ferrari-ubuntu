@@ -123,8 +123,10 @@ export default class NoirIslandExtension extends Extension {
     this._watched.clear();
 
     // Handler destroy menempel pada notifikasi milik shell, jadi ikut dilepas
-    // supaya tidak memanggil _render() setelah extension mati.
-    for (const [n, id] of this._hooked.values())
+    // supaya tidak memanggil _render() setelah extension mati. Yang diiterasi
+    // adalah pasangan [notifikasi, id] milik Map itu sendiri — .values() hanya
+    // mengeluarkan id (angka), dan menghancurkan sisa disable() di bawahnya.
+    for (const [n, id] of this._hooked)
       n.disconnect(id);
     this._hooked.clear();
 
