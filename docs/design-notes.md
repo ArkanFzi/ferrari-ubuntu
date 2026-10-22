@@ -253,10 +253,11 @@ aplikasi apa pun.
 Notch yang selalu terpasang ternyata sama saja dengan ornamen: ia menempel
 tanpa mengatakan apa pun. Sekarang island mulai dari keadaan **tersimpan**
 (`_stowed`, actor `visible=false` sejak `enable()`) dan hanya keluar kalau ada
-isisnya. Aturan isinya satu baris: trek terpilih (lewat `_pick()`, jadi **paused
-pun ikut** — pill `JEDA` adalah satu-satunya tanda bahwa ada lagu siap
-dilanjutkan, dan itu keputusan eksplisit, bukan kebetulan) atau notifikasi yang
-sedang tampil / masih mengantre.
+isisnya. Aturan isinya satu baris: trek yang **sedang berbunyi** (`Playing`) atau
+notifikasi yang sedang tampil / masih mengantre. Trek paused bukan isi — ia
+hanya menunda tidur selama grace, lalu island mundur (revisi 22/10: aturan
+lama "paused pun ikut" membuat island menempel berjam-jam di laptop yang
+lagunya berhenti, dan itu persis ornamen yang barusan dikritik).
 
 - **Grace 4 dtk sebelum mundur.** Trek terakhir habis, trek berikutnya menyusul
   1 dtk kemudian: tanpa jeda itu island kedip masuk-keluar di setiap pergantian
@@ -353,6 +354,44 @@ dinding — termasuk seluruh waktu paused — ikut dihitung sebagai waktu play.
 - **Label mana yang dibaca.** Pola pencocokan harus menuntut `m:ss / m:ss`;
   tanpa bagian total, probe menjemput label `0:00` milik shell lain dan
   menyimpulkan kartu yang benar jadi salah.
+
+### Layer hitam setelah pause: morph yang batal tanpa suara
+
+Sesi live, 16:17: trek dipause, island pindah ke state `idle` (baris log-nya
+ada), tapi ukuran card tetap **452x67** — geometri media — dengan baris pill
+meregang 452 px dan baris media dimatikan. Hasilnya kotak hitam kosong, persis
+"island-nya hilang, tinggal layer hitam". Diukur lewat AT-SPI, bukan dilihat:
+`panel 734,28 452x67 SHOWING` + `label "Adam" 802,29 370x18`.
+
+Dua percobaan gagal mereproduksinya: rig polos (hanya noir-island) dan **rig
+cermin** (dconf live + seluruh extension user + tema WhiteSur, 1600x1200) sama-
+sama memberi `idle 197x34 @702,32` dengan `alloc=197x34`. Jadi bukan salah
+ekstensi lain, bukan tema, bukan ukuran monitor.
+
+Yang tersisa dan cocok dengan seluruh data adalah satu jalur senyap di
+`_animateTo()`: `if (!mon) return;`. `_render()` memanggil `_animateTo()`
+**sebelum** mencetak baris state, jadi `idle` di log tidak pernah membuktikan
+morph benar-benar jalan. Yang dilakukan sekarang:
+
+- **Geometri monitor di-cache** (`_monitor()`). `primaryMonitor` bisa kosong
+  sesaat (konfigurasi display berubah, layar blank); fallback tetap memakai
+  geometri terakhir dan **mencetak log**, tidak lagi batal diam-diam.
+- **Lebar non-finite ditolak.** `get_preferred_width()` yang mengembalikan NaN
+  membuat `ease({width: NaN, ...})` gugur seluruhnya — satu properti rusak
+  membatalkan morph tinggi dan posisi sekaligus. `_widthFor()` sekarang jatuh
+  kembali ke `base`.
+- **Jendela gejalanya menyempit.** Dengan paused yang tidak lagi dihitung isi,
+  card yang tertinggal di ukuran media paling lama terlihat 4 dtk (grace)
+  sebelum island mundur total.
+- **Jujur: penyebab `primaryMonitor` kosong di sesi live belum tertangkap.**
+  Shell live tidak bisa di-inject (Eval dan Screenshot diblokir), jadi bukti
+  terakhirnya baru bisa datang dari journal setelah reload — baris state sekarang
+  membawa `@x,y` dan `panel=`, dan fallback di atas mencetak satu baris sendiri.
+- **Harness A–I sendiri yang paling sering salah**: fase C gagal 2 dari 4 run
+  terakhir karena satu klik `xdotool` tidak sampai ke tombol (tidak ada
+  `PlayPause` di log player), lalu semua fase sesudahnya ikut melenceng. Run
+  ulang selalu HIJAU; yang perlu diperbaiki adalah harness-nya (retry per klik),
+  bukan produknya.
 
 ## Yang sengaja tidak diubah
 

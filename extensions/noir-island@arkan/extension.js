@@ -84,6 +84,7 @@ export default class NoirIslandExtension extends Extension {
     this._stowed = true;
     this._stowAt = 0;
     this._geo = '';
+    this._mon = null;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -365,10 +366,22 @@ export default class NoirIslandExtension extends Extension {
     this._btnPlay.set_child(new St.Icon({icon_name: name, icon_size: 16}));
   }
 
+  // Geometri monitor terakhir yang diketahui. primaryMonitor bisa kosong sesaat
+  // (konfigurasi display berubah), dan morph yang batal diam-diam meninggalkan
+  // card di ukuran state sebelumnya: log state tetap tercetak, pixel-nya tidak.
+  _monitor() {
+    const mon = Main.layoutManager.primaryMonitor;
+    if (mon)
+      this._mon = {x: mon.x, y: mon.y, width: mon.width};
+    else if (this._mon)
+      log('noir-island: primaryMonitor kosong, morph pakai geometri terakhir');
+    return this._mon;
+  }
+
   // Sudut kiri-atas card untuk satu lebar. Island menggantung rata di tepi
   // bawah panel, bukan melayang di bawahnya.
   _anchor(w) {
-    const mon = Main.layoutManager.primaryMonitor;
+    const mon = this._monitor();
     return [
       Math.round(mon.x + (mon.width - w) / 2),
       Math.round(mon.y + (Main.panel.height || 0)),
@@ -376,8 +389,7 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _place() {
-    const mon = Main.layoutManager.primaryMonitor;
-    if (!mon || !this._island)
+    if (!this._monitor() || !this._island)
       return;
     const [x, y] = this._anchor(this._island.width || IDLE_W);
     this._island.set_position(x, y);
@@ -406,16 +418,17 @@ export default class NoirIslandExtension extends Extension {
     if (!row)
       return base;
     const [, nat] = row.get_preferred_width(SIZE[state][1]);
-    const mon = Main.layoutManager.primaryMonitor;
+    const mon = this._monitor();
     const cap = mon ? Math.round(mon.width * 0.7) : base;
-    return Math.min(cap, Math.max(base, nat));
+    return Math.min(cap, Math.max(base, Number.isFinite(nat) ? nat : base));
   }
 
-  // Isi = sesuatu yang layak dilihat. Trek terpilih (main pun paused, karena
-  // pill JEDA adalah satu-satunya tanda bahwa ada lagu siap dilanjutkan) atau
-  // notifikasi yang sedang tampil / masih mengantre.
+  // Isi = sesuatu yang sedang terjadi. Trek yang benar-benar berbunyi, atau
+  // notifikasi yang tampil / masih mengantre. Trek paused BUKAN isi: island yang
+  // tetap nempel berjam-jam setelah lagu berhenti adalah ornamen, dan pill JEDA
+  // tidak berarti apa-apa kalau ia tidak pernah pergi.
   _hasContent(player) {
-    return !!(player || this._showing || this._pending.length);
+    return !!(player?.status === 'Playing' || this._showing || this._pending.length);
   }
 
   // Mundur ke dalam panel: tinggi menyusut ke 0 sambil seluruh card memudar,
@@ -465,7 +478,7 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _animateTo(state) {
-    const mon = Main.layoutManager.primaryMonitor;
+    const mon = this._monitor();
     if (!mon)
       return;
     const w = this._widthFor(state);
