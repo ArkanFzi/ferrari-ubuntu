@@ -1,19 +1,20 @@
 /* noir-island@arkan — notch yang menggantung rata di tepi bawah panel.
-   Siluetnya tanpa border: sudut atas kotak karena menempel ke panel, bawah
-   melengkung 22 px. Kedalaman datang dari satu garis rambut di tepi atas dan
-   dari kontras hitam pekat ke panel, bukan dari shadow (St tidak mengenal
-   clip-path/mask, dan shadow hanya bisa digambar di luar box).
+   Siluetnya sudut atas kotak karena menempel ke panel, bawah melengkung 22 px.
+   Kedalaman datang dari key line yang mengelilingi card — digambar sebagai
+   box-shadow inset, bukan border, karena border memakan isi box dan menggeser
+   teks (design-notes), sementara St mengenal inset shadow (dipakai Yaru sendiri
+   di gnome-shell.css: "box-shadow: inset 0 0 0 1px ...").
    Rosso Corsa #da291c dipakai hanya untuk hal yang sedang terjadi (TIER 0):
-   titik hidup, rel progres, tombol play, tombol Buka, rail prioritas saat ada
-   notifikasi critical, dan badge antrean. */
+   garis kunci saat hidup, titik hidup, rel progres, tombol play, tombol Buka,
+   rail prioritas saat ada notifikasi critical, dan badge antrean. */
 
 .noir-island {
   font-family: Inter;
   font-size: 11px;
   color: #f2f2f2;
   background-color: rgba(8, 8, 10, 0.97);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 0 0 22px 22px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
 }
 
 /* Padding horizontal hidup di baris, bukan di card, supaya rel progres dan rail
@@ -21,6 +22,27 @@
 .noir-island-pad {
   padding: 0 14px;
   spacing: 8px;
+}
+
+/* Pill dibungkus St.Button supaya klik di mana pun membukanya jadi card. Button
+   punya gaya global dari tema shell (background, border, min-height) yang akan
+   menggambar kotak di dalam kotak; di sini dinetralkan seluruhnya, pill harus
+   terlihat persis seperti sebelumnya. */
+.noir-island-pillbtn {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background-color: transparent;
+  min-height: 0;
+  color: inherit;
+}
+
+.noir-island-pillbtn:hover,
+.noir-island-pillbtn:active {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .noir-island-row {
@@ -41,7 +63,7 @@
 }
 
 .noir-island--live {
-  border-top-color: rgba(218, 41, 28, 0.30);
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.34);
 }
 
 .noir-island--live .noir-island-dot {
@@ -117,7 +139,9 @@
 }
 
 .noir-island-prog {
-  height: 3px;
+  /* Band selebar 12 px untuk pointer; bar yang terlihat tetap 3 px dan dipajang
+     di dasarnya lewat set_position() di JS, jadi siluet card tidak berubah. */
+  height: 12px;
   /* PROG_INSET di extension.js angka yang sama: lebar isi = lebar card - 2x. */
   margin: 0 11px;
   background-color: rgba(255, 255, 255, 0.08);
@@ -125,6 +149,11 @@
 }
 
 .noir-island-progfill {
+  /* Tingginya harus diminta sendiri: _progress adalah St.Widget polos tanpa
+     layout manager, jadi anaknya tidak ikut dialokasi — tanpa min-height isi
+     rel tetap 5x0 dan progres tidak pernah terlihat (dibuktikan run baseline:
+     "panel 567,77 5x0"). Lebarnya yang di-set JS lewat ease(). */
+  min-height: 3px;
   background-color: #da291c;
   border-radius: 2px;
 }

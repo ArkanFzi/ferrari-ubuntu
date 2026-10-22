@@ -433,6 +433,77 @@ dan dari kunci extension yang sudah dimodifikasi (`just-perfection/panel-size`,
 `tiling-assistant/active-window-hint-color` merah Ferrari, `appindicator/icon-size`).
 Harness sekarang menulis seed di dalam `dbus-run-session` sendiri.
 
+## TIER 28 — island: geometri dipatok, level jadi sumbu sendiri, jam panel diambil-alih
+
+User menilai island "tidak stabil sama sekali dan sangat kurang dalam design UI
+dan UX". Akar tunggalnya satu baris: `_widthFor()` memakai `get_preferred_width()`
+baris sebagai lebar kartu. Panjang judul ikut menentukan bentuk island, jadi
+lebar melompat 156 → 664 px antar trek, `_ellipsize()` tidak pernah bekerja
+(actor selalu selebar teksnya sendiri), dan tombol transport terdorong keluar.
+Satu properti rusak juga membatalkan `ease({width, height, x, y})` seluruhnya —
+gejala yang sama dengan "layer hitam" di TIER 27.
+
+**Geometri adalah fungsi dari (level, content), tidak pernah dari isinya.**
+`PILL_W 240`, `PEEK_W 340`, `MEDIA_W 420`, `NOTIF_W 460`, di-clamp 60% lebar
+monitor. `get_preferred_width()` turun jabatan jadi pengukur label individual.
+
+**Level adalah sumbu orthogonal, bukan state baru.** `_decideState()` tetap satu-
+satunya sumber kebenaran "isi" (NOTIF > MEDIA > IDLE + aturan fullscreen tidak
+disentuh); di atasnya ada `_level ∈ hidden|pill|peek|card` yang hanya digerakkan
+pointer/klik/timer. Hover dibaca lewat polling `global.get_pointer()` 120 ms,
+bukan `captured-event` MOTION (di X11 tidak terkirim ke stage saat klien memegang
+pointer grab — hover mati persis di atas video fullscreen) dan bukan `track-input`
+(Wayland). Dead band 44/64 px dan 2 poll masuk / 3 poll keluar: 20 sapuan pointer
+bolak-balik menghasilkan 20 `unhide` + 20 `stow`, bukan strobo.
+
+**Satu penyimpangan dari rencana, disengaja.** Trek baru diumumkan sebagai peek
+3 dtk lalu island **tidur**, bukan bertahan sebagai pill persisten; card penuh
+hanya lewat hover → klik. Kalau pill persisten yang dipilih, island mencaplok
+klik tengah-atas permanen dan memakan jam panel selamanya (risiko #2 di rencana).
+Yang tetap seperti rencana: notifikasi selalu membuka card, dan jam panel kembali
+saat island tidur.
+
+**Jam panel.** `_setActive()` menggantikan `_setInput()` + toggle `--live`:
+input region, reaktivitas, opacity, dan `dateMenu.container.hide()/.show()` di
+satu tempat. `_setClock(show)` dijaga `_clockHiddenByUs` supaya island tidak
+pernah memaksa tampil jam yang memang dimatikan Just Perfection, dan
+`_setActive(false)` adalah statement pertama `disable()`.
+
+**Yang mengalah pada teks panjang adalah baris sekunder, bukan jam.** Versi
+pertama `_fitText()` mengorbankan label waktu begitu judul tidak muat; di rig
+hasilnya kartu tanpa "0:12 / 3:30" padahal judul tetap terpotong — bayarnya
+nyata, manfaatnya nol. Sekarang album didrop lebih dulu, lalu artis, judul selalu
+tinggal dan memotong dirinya. `MEDIA_CHROME_W 251` menyisakan 169 px kolom teks
+pada card 420 px.
+
+**Dua bug yang hanya bisa kelihatan di rig, bukan di baca-kode:**
+- `_seekAt()` memakai `get_allocation_box()` (koordinat orang tua) bersama
+  `event.get_coords()` (koordinat panggung). Klik di tengah rail dihitung sebagai
+  ujunya sendiri: `seek 0:12 -> 3:30`, bus 212 dtk dari trek 210 dtk. Setelah pindah ke
+  `get_transformed_position()`: 12,0 s → 107,1 s, target 105 s.
+- Seek juga butuh `CanControl`/`CanSeek` yang selama ini dibaca dari bus lalu
+  dibuang; rail sekarang `reactive` hanya kalau player memang bisa di-seret.
+
+**Bukti run `S12fit`** (rig Xephyr `:9` 1600x1200 + pemain MPRIS palsu,
+`error: 0`, `HASIL=HIJAU`): peek `340x34 @630,32` lalu tidur 3429 ms; hover
+membangunkan pill 230 ms; pointer pergi menyusut 343 ms; klik → card `420x76
+@590,32` dalam 9 ms; klik-luar melepas card dan hover berikutnya masih hidup
+(bukti tidak ada grab tertinggal); notif `460x72`; trek 77 karakter → judul
+SHOWING 169 px ter-elipsis, artis (natural 312 px) DI-DROP, album tetap, waktu
+tetap, 0 node di luar rect card. Jam panel terukur pixel — 31 kolom gelap saat
+island tidur, 0 saat pill/card/notif, dan kembali (34) setelah
+`gnome-extensions disable` di tengah pill yang sedang tampil.
+
+**Alat ukur yang gagal dan kenapa.** Probe jam lewat *nama* aksesibel tidak
+bekerja: dateMenu build ini menghasilkan 0 node bernama jam, padahal pixel crop
+jelas menampilkan "Oct 22 22:24". Ganti ke penghitung kolom piksel gelap. Dua
+jebakan sekaligus: x11grab membulatkan tinggi grab (baris 32-33 ikut tertangkap,
+dan di situlah pill island mulai digambar — strip dipotong ke `PB-2`), dan jam
+Ubuntu duduk di **tengah** panel, persis di bawah island, jadi wilayah ukur 660-
+940 bukan kanan atas. Assertion juga pindah dari `grep -c` kumulatif ke **nomor
+baris** log: probe AT-SPI memakan beberapa detik dan baseline kumulatif sempat
+menelan kejadian yang sedang ditunggu (seek dilaporkan GAGAL padahal log-nya ada).
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di

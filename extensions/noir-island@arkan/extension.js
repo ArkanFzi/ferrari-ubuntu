@@ -23,13 +23,23 @@ const PLAYER_IFACE = 'org.mpris.MediaPlayer2.Player';
 // Island menggantung rata di bawah panel: tanpa celah, sudut atas kotak, jadi
 // ia dibaca sebagai bagian dari bezel, bukan sebagai toast. Padding horizontal
 // hidup di CSS (.noir-island-pad), kecuali PROG_INSET yang dipakai lagi di JS.
-const IDLE_W = 156;
-const IDLE_H = 34;
-const MEDIA_W = 452;
+//
+// Lebar DIPATOK per state, bukan diukur dari isinya. Dulu _widthFor() memakai
+// natural width barisnya: judul trek yang panjang menggeser card 156 -> 489 px
+// (terbukti di run baseline rig), ellipsis tidak pernah bekerja karena actor
+// selalu selebar teksnya, dan tombol transport terdorong keluar.
+const PILL_W = 240;
+const PEEK_W = 340;
+// Tinggi pill dan peek: satu baris. Card punya tingginya sendiri (CARD_H).
+const PILL_H = 34;
+const MEDIA_W = 420;
 const MEDIA_H = 64;
-const NOTIF_W = 474;
+const NOTIF_W = 460;
 const NOTIF_H = 72;
-const PROGRESS_H = 3;
+// Band tempat rel progres hidup: 12 px untuk pointer, 3 px untuk mata. Bar
+// dipajang di dasar band supaya siluet card tidak berubah dari sebelumnya.
+const PROGRESS_H = 12;
+const PROG_BAR_H = 3;
 // Sudut bawah card melengkung 22 px; pada tinggi 3 px lengkungan itu sudah
 // masuk 11 px dari tepi, jadi rel progres berhenti di situ supaya tidak
 // mencuat keluar siluet (St tidak punya clip-path/mask).
@@ -38,6 +48,28 @@ const COVER_PX = 44;
 
 const ANIM_MS = 260;
 const FADE_MS = 120;
+// State baru harus bertahan sejenak sebelum diterima. Angka di bawah ambang
+// kedip mata tapi di atas flapping player yang paling umum.
+const DWELL_MS = 1200;
+// Pengumuman isi (trek baru) melebar sebentar lalu mundur sendiri. Pointer di
+// dalam region island tidak mempercepat maupun menahannya: level peek hanya
+// soal lebar, bukan soal siapa yang boleh memegangnya.
+const PEEK_MS = 3000;
+// Hover dibaca lewat polling global.get_pointer(), bukan captured-event MOTION
+// (di X11 tidak terkirim ke stage saat klien memegang pointer grab, jadi mati
+// persis di atas video fullscreen) dan bukan track-input (Wayland). 8 query per
+// detik saat island tertidur adalah harga tombol yang bisa diklik.
+const HOVER_POLL_MS = 120;
+// Dead band 20 px antara masuk dan keluar: tanpa itu pill yang persis seukuran
+// region masuk akan nyala-mati tiap frame saat pointer berdiri di ambangnya.
+const HOVER_IN_Y = 44;
+const HOVER_OUT_Y = 64;
+const HOVER_IN_X = 120;
+const HOVER_OUT_X = 160;
+// Dua poll (240 ms) untuk bangun, tiga (360 ms) untuk tidur: masuk harus terasa
+// instan, keluar harus yakin.
+const HOVER_IN_POLLS = 2;
+const HOVER_OUT_POLLS = 3;
 // Tarik-mundur ke bezel lebih cepat dari morph antar state: keluar harus terasa
 // sebagai keputusan, bukan sebagai transisi yang sedang berlangsung.
 const STOW_MS = 220;
@@ -51,11 +83,29 @@ const DBUS_TIMEOUT_MS = 400;
 const QUEUE_MAX = 8;
 const BODY_MAX = 160;
 const SCAN_TICKS = 4;
+// Di bawah angka ini card tidak bisa memuat apa pun yang terbaca.
+const MIN_W = 200;
+// Seluruh isi card selain kolom judul pada state media: padding kiri-kanan
+// (2x14), thumb (44), dua gap baris (2x10) dan kelompok kontrol lengkap
+// (waktu + hairline + tiga tombol). Diukur di rig: card 420 px menyisakan
+// 169 px untuk kolom teks.
+const MEDIA_CHROME_W = 251;
 
-const SIZE = {
-  idle: [IDLE_W, IDLE_H],
-  media: [MEDIA_W, MEDIA_H + PROGRESS_H],
-  notif: [NOTIF_W, NOTIF_H],
+// Geometri adalah fungsi dari (level, content), tidak pernah dari isinya. Pill
+// dan peek cuma beda lebar; card mengambil angka per konten.
+const CARD_W = {
+  media: MEDIA_W,
+  notif: NOTIF_W,
+};
+
+const CARD_H = {
+  media: MEDIA_H + PROGRESS_H,
+  notif: NOTIF_H,
+};
+
+const LEVEL_W = {
+  pill: PILL_W,
+  peek: PEEK_W,
 };
 
 function monoMs() {
@@ -76,13 +126,20 @@ export default class NoirIslandExtension extends Extension {
     this._hooked = new Map();
     this._pairs = [];
     this._state = null;
-    this._inputOn = null;
     this._coverKey = null;
-    this._progW = IDLE_W - 2 * PROG_INSET;
+    this._progW = PILL_W - 2 * PROG_INSET;
     // Awal mula: tersimpan di dalam panel. Island tidak pernah "hidup" tanpa
-    // isi; yang pertama membangunkannya adalah trek atau notifikasi.
+    // isi; yang pertama membangunkannya adalah trek, notifikasi, atau pointer
+    // yang datang dekat panel.
     this._stowed = true;
     this._stowAt = 0;
+    // Signature isi terakhir yang benar-benar digambar; null paksa render penuh.
+    this._sig = null;
+    this._isi = null;
+    this._wantState = null;
+    this._wantAt = 0;
+    this._forced = false;
+    this._dwellId = 0;
     this._geo = '';
     this._mon = null;
     this._shownKey = null;
@@ -90,6 +147,20 @@ export default class NoirIslandExtension extends Extension {
     this._fullscreen = false;
     this._tickId = null;
     this._scanEvery = 0;
+    // Level adalah sumbu kedua: content menjawab "apa yang boleh tampil", level
+    // menjawab "seberapa lebar". Keduanya independen, dan hanya pointer/klik/
+    // timer yang menggerakkan level.
+    this._level = null;
+    this._shape = '';
+    this._hoverOn = false;
+    this._hoverIn = 0;
+    this._hoverOut = 0;
+    this._hoverId = 0;
+    this._peekUntil = 0;
+    this._cardOpen = false;
+    this._outsideId = 0;
+    this._active = null;
+    this._clockHiddenByUs = false;
 
     this._notifSettings = new Gio.Settings({
       schema_id: 'org.gnome.desktop.notifications',
@@ -97,7 +168,7 @@ export default class NoirIslandExtension extends Extension {
 
     this._buildIsland();
     Main.layoutManager.addChrome(this._island, {affectsInputRegion: false});
-    this._inputOn = false;
+    this._active = false;
     this._island.visible = false;
     this._place();
 
@@ -105,8 +176,8 @@ export default class NoirIslandExtension extends Extension {
       this._fullscreen = !!Main.layoutManager.primaryMonitor?.inFullscreen;
       this._render();
     });
-    this._on(Main.layoutManager, 'monitors-changed', () => this._place());
-    this._on(Main.panel, 'notify::height', () => this._place());
+    this._on(Main.layoutManager, 'monitors-changed', () => this._relayout());
+    this._on(Main.panel, 'notify::height', () => this._relayout());
     this._on(this._notifSettings, 'changed::show-banners', () => {
       if (this._dndOff())
         this._showing = null;
@@ -120,14 +191,28 @@ export default class NoirIslandExtension extends Extension {
       this._tick();
       return GLib.SOURCE_CONTINUE;
     });
+    this._hoverId = GLib.timeout_add(GLib.PRIORITY_LOW, HOVER_POLL_MS, () => {
+      this._pollHover();
+      return GLib.SOURCE_CONTINUE;
+    });
     this._render();
     log('noir-island: aktif');
   }
 
   disable() {
+    // Statement pertama, sebelum apa pun yang bisa melempar: satu-satunya
+    // jaminan jam panel kembali kalau island sedang memakannya.
+    this._setActive(false);
+    this._armOutside(false);
     if (this._tickId)
       GLib.source_remove(this._tickId);
     this._tickId = null;
+    if (this._hoverId)
+      GLib.source_remove(this._hoverId);
+    this._hoverId = 0;
+    if (this._dwellId)
+      GLib.source_remove(this._dwellId);
+    this._dwellId = 0;
 
     for (const [obj, id] of this._pairs)
       obj.disconnect(id);
@@ -158,7 +243,11 @@ export default class NoirIslandExtension extends Extension {
       this._island = null;
     }
     this._state = null;
-    this._inputOn = null;
+    this._level = null;
+    this._shape = '';
+    this._hoverOn = false;
+    this._cardOpen = false;
+    this._peekUntil = 0;
   }
 
   _on(obj, signal, handler) {
@@ -173,11 +262,25 @@ export default class NoirIslandExtension extends Extension {
       vertical: true,
       reactive: false,
     });
-    island.set_size(IDLE_W, IDLE_H);
+    island.set_size(PILL_W, PILL_H);
     this._island = island;
 
     // Pill: keadaan diam, dan keadaan jeda (track terakhir masih terbaca di bus).
-    this._pillRow = new St.BoxLayout({style_class: 'noir-island-pad'});
+    // y_expand membuat baris mengambil seluruh tinggi card. Tanpa itu BoxLayout
+    // vertikal meletakkan barisnya di tepi atas dan menyisakan 20 px hitam di
+    // bawah konten (baseline rig: card 67 px, isi 44 px).
+    // Pill dibungkus satu St.Button: klik di mana pun pada pill membuka card,
+    // tanpa plumbing event sendiri — idioma yang sama dengan lima tombol lain.
+    // noir-island-pillbtn hanya menetralkan gaya `button` global tema; isinya
+    // tetap BoxLayout biasa supaya geometri pill tidak berubah sedikit pun.
+    this._pillRow = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      y_expand: true,
+      can_focus: false,
+    });
+    this._pillRow.connect('clicked', () => this._expand());
+    const pill = new St.BoxLayout({style_class: 'noir-island-pad'});
+    this._pillRow.set_child(pill);
     this._dot = new St.Widget({
       style_class: 'noir-island-dot',
       y_align: Clutter.ActorAlign.CENTER,
@@ -193,22 +296,25 @@ export default class NoirIslandExtension extends Extension {
       y_align: Clutter.ActorAlign.CENTER,
       visible: false,
     });
-    this._pillRow.add_child(this._dot);
-    this._pillRow.add_child(this._pillKicker);
-    this._pillRow.add_child(this._hairline());
-    this._pillRow.add_child(this._pillText);
-    this._pillRow.add_child(this._pillBadge);
+    pill.add_child(this._dot);
+    pill.add_child(this._pillKicker);
+    pill.add_child(this._hairline());
+    pill.add_child(this._pillText);
+    pill.add_child(this._pillBadge);
     island.add_child(this._pillRow);
 
     // Media: artwork, tiga baris teks (judul/artis/album), transport.
     this._mediaRow = new St.BoxLayout({
       style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
       visible: false,
     });
     this._cover = new St.Bin({
       style_class: 'noir-island-cover',
       x_align: Clutter.ActorAlign.FILL,
-      y_align: Clutter.ActorAlign.FILL,
+      // CENTER, bukan FILL: tinggi 44 px di CSS hanya batas bawah, jadi Bin yang
+      // fill ikut meregang setinggi barisnya (thumb jadi persegi panjang).
+      y_align: Clutter.ActorAlign.CENTER,
     });
     // Tile artwork dibiarkan berisi ikon sampai ada art sungguhan, supaya card
     // tidak pernah membuka dengan kotak kosong.
@@ -258,8 +364,16 @@ export default class NoirIslandExtension extends Extension {
     this._progress = new St.Widget({
       style_class: 'noir-island-prog',
       visible: false,
+      // Band setinggi 12 px, bar terlihat tetap 3 px di dasarnya: target pointer
+      // 3 px tidak pernah bisa dipanggil, dan rail inilah satu-satunya jalur seek
+      // di card.
+      reactive: true,
     });
+    this._progress.connect('button-press-event', (a, e) => this._seekAt(e));
     this._progressFill = new St.Widget({style_class: 'noir-island-progfill'});
+    // _progress tidak punya layout manager (anaknya dulu dialokasi 5x0 karena
+    // itu), jadi posisi bar dituliskan tangan: mendarat di dasar band.
+    this._progressFill.set_position(0, PROGRESS_H - PROG_BAR_H);
     this._progress.add_child(this._progressFill);
     island.add_child(this._progress);
 
@@ -268,13 +382,14 @@ export default class NoirIslandExtension extends Extension {
     // menyentuh tepi card; gantinya tile dan tombol membawa margin sendiri.
     this._notifRow = new St.BoxLayout({
       style_class: 'noir-island-row',
+      y_expand: true,
       visible: false,
     });
     this._rail = new St.Widget({style_class: 'noir-island-rail'});
     this._iconBin = new St.Bin({
       style_class: 'noir-island-tile',
       x_align: Clutter.ActorAlign.FILL,
-      y_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
     });
     const ncol = new St.BoxLayout({
       vertical: true,
@@ -318,7 +433,11 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _label(className) {
-    const label = new St.Label({style_class: className, x_expand: true});
+    const label = new St.Label({
+      style_class: className,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
     this._ellipsize(label, Pango.EllipsizeMode.END);
     return label;
   }
@@ -391,44 +510,142 @@ export default class NoirIslandExtension extends Extension {
   _place() {
     if (!this._monitor() || !this._island)
       return;
-    const [x, y] = this._anchor(this._island.width || IDLE_W);
+    const [x, y] = this._anchor(this._island.width || PILL_W);
     this._island.set_position(x, y);
   }
 
-  // Island hanya boleh merebut klik saat melebar. Input region chrome ditentukan
-  // saat actor dipasang, jadi bentuknya diganti dengan pasang-ulang.
-  _setInput(on) {
-    if (this._inputOn === on || !this._island)
+  // Lebar card bergantung pada monitor, tingginya pada posisi panel. Keduanya
+  // tidak ikut tersimpan di signature, jadi perubahan tata letak memaksa render
+  // berikutnya menghitung morph ulang, bukan cuma memindah actor di tempat lama.
+  _relayout() {
+    this._sig = null;
+    this._shape = '';
+    this._place();
+    this._render();
+  }
+
+  // Satu sakelar untuk seluruh konsekuensi "island sedang tampil": siapa yang
+  // boleh merebut klik, apakah key line rosso menyala, dan apakah jam panel boleh
+  // ada. Ketiganya harus naik-turun bersamaan, atau island bisa terlihat tapi
+  // tidak bisa diklik — atau makan jam panel selamanya.
+  _setActive(on) {
+    if (this._active === on || !this._island)
       return;
-    this._inputOn = on;
+    this._active = on;
+    // Input region chrome ditentukan saat actor dipasang, jadi bentuknya diganti
+    // dengan pasang-ulang.
     Main.layoutManager.removeChrome(this._island);
     Main.layoutManager.addChrome(this._island, {affectsInputRegion: on});
     this._island.set_reactive(on);
     this._place();
+    if (on)
+      this._island.add_style_class_name('noir-island--live');
+    else
+      this._island.remove_style_class_name('noir-island--live');
+    this._setClock(!on);
   }
 
-  // Lebar state diambil dari isi teksnya, bukan dari angka tetap: judul panjang
-  // dan label tombol tidak boleh terpotong. Konstanta SIZE jadi batas bawah,
-  // 70% monitor jadi batas atas. Padding sudah ikut terhitung karena yang
-  // diukur lebar natural barisnya sendiri, bukan isi di dalamnya.
-  _widthFor(state) {
-    const base = SIZE[state][0];
-    const row = state === 'media' ? this._mediaRow
-      : state === 'notif' ? this._notifRow : this._pillRow;
-    if (!row)
-      return base;
-    const [, nat] = row.get_preferred_width(SIZE[state][1]);
+  // Jam panel hanya boleh dikembalikan kalau KITA yang menyembunyikannya: Just
+  // Perfection menulis actor yang sama, dan show() buta akan memaksa tampil jam
+  // yang memang dimatikan user di sana.
+  _setClock(show) {
+    const clock = Main.panel?.statusArea?.dateMenu?.container;
+    if (!clock)
+      return;
+    if (show) {
+      if (!this._clockHiddenByUs)
+        return;
+      this._clockHiddenByUs = false;
+      clock.show();
+    } else if (!this._clockHiddenByUs) {
+      this._clockHiddenByUs = true;
+      clock.hide();
+    }
+  }
+
+  // Hover diuji per poll, tidak pernah lewat sinyal: captured-event MOTION di
+  // X11 tidak terkirim ke stage saat klien memegang pointer grab, dan track-input
+  // tidak tersedia di Wayland.
+  _pollHover() {
     const mon = this._monitor();
-    const cap = mon ? Math.round(mon.width * 0.7) : base;
-    return Math.min(cap, Math.max(base, Number.isFinite(nat) ? nat : base));
+    if (!mon || !this._island)
+      return;
+    const [x, y] = global.get_pointer();
+    const bawah = mon.y + (Main.panel.height || 0);
+    const dx = Math.abs(x - (mon.x + mon.width / 2));
+    const dekat = y >= mon.y && y <= bawah + HOVER_IN_Y && dx <= HOVER_IN_X;
+    const jauh = y > bawah + HOVER_OUT_Y || dx > HOVER_OUT_X;
+    if (this._hoverOn) {
+      this._hoverIn = 0;
+      if (!jauh) {
+        this._hoverOut = 0;
+        return;
+      }
+      if (++this._hoverOut < HOVER_OUT_POLLS)
+        return;
+      this._hoverOut = 0;
+      this._hoverOn = false;
+      this._render();
+      // Card notif dan card yang dibuka lewat klik tidak ditopang hover, jadi
+      // mereka tetap bangun. Hanya pill yang boleh meleleh sekarang juga, tanpa
+      // menunggu grace: hover yang pergi adalah keputusan user, bukan fluktuasi.
+      if (!this._level)
+        this._stow();
+      return;
+    }
+    this._hoverOut = 0;
+    if (!dekat) {
+      this._hoverIn = 0;
+      return;
+    }
+    if (++this._hoverIn < HOVER_IN_POLLS)
+      return;
+    this._hoverIn = 0;
+    this._hoverOn = true;
+    this._render();
+  }
+
+  // Lebar dan tinggi dipatok per (level, content), hanya dipangkas kalau
+  // monitornya sempit. Isi tidak boleh menentukan lebar: itu yang membuat morph
+  // terasa sebagai kedip (156 -> 489 px tiap ganti trek, run baseline rig) dan
+  // membuat ellipsis tidak pernah bekerja, karena actor selalu selebar teksnya.
+  _capFor(level, content) {
+    const want = level === 'card' ? (CARD_W[content] ?? MEDIA_W)
+      : (LEVEL_W[level] ?? PILL_W);
+    const mon = this._monitor();
+    if (!mon || !Number.isFinite(mon.width))
+      return want;
+    return Math.max(MIN_W, Math.min(want, Math.round(mon.width * 0.6)));
+  }
+
+  _heightFor(level, content) {
+    return level === 'card' ? (CARD_H[content] ?? CARD_H.media) : PILL_H;
+  }
+
+  // Level adalah efek samping dari isi, pointer, klik, dan timer peek — bukan
+  // state baru. Prioritas NOTIF > MEDIA > IDLE tetap diputuskan _decideState().
+  // Card media hanya lewat klik; card notif selalu penuh karena notifikasi
+  // adalah interupsi yang membawa tombolnya sendiri. Null = tidak ada yang boleh tampil.
+  _levelFor(content) {
+    if (content === 'notif')
+      return 'card';
+    if (content === 'media') {
+      if (this._cardOpen)
+        return 'card';
+      if (monoMs() < this._peekUntil)
+        return 'peek';
+      return this._hoverOn ? 'pill' : null;
+    }
+    return this._hoverOn ? 'pill' : null;
   }
 
   // Isi = sesuatu yang boleh tampil (aturan ada di _decideState) plus notifikasi
-  // yang masih mengantre, karena pill +N menahan jejaknya. Trek paused BUKAN
-  // isi: island yang tetap nempel berjam-jam setelah lagu berhenti adalah
-  // ornamen, dan pill JEDA tidak berarti apa-apa kalau ia tidak pernah pergi.
+  // yang masih mengantre, karena pill +N menahan jejaknya, plus pointer yang
+  // sedang berdiri dekat panel: tanpa clause terakhir, grace _tick() akan
+  // menidurkan pill jam di tengah hover.
   _hasContent(player) {
-    return this._decideState(player) !== 'idle' || this._pending.length > 0;
+    return this._decideState(player) !== 'idle' || this._pending.length > 0 ||
+      this._hoverOn;
   }
 
   // Mundur ke dalam panel: tinggi menyusut ke 0 sambil seluruh card memudar,
@@ -440,7 +657,11 @@ export default class NoirIslandExtension extends Extension {
       return;
     this._stowed = true;
     this._stowAt = 0;
-    this._setInput(false);
+    // Habis tidur, render berikutnya wajib menggambar lagi walau isinya sama
+    // persis: actor-nya sendiri baru saja dimatikan.
+    this._sig = null;
+    this._armOutside(false);
+    this._setActive(false);
     for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._progress])
       row.visible = false;
     const [x, y] = this._anchor(this._island.width);
@@ -477,12 +698,12 @@ export default class NoirIslandExtension extends Extension {
     log('noir-island: unhide');
   }
 
-  _animateTo(state) {
+  _animateTo(level, content) {
     const mon = this._monitor();
     if (!mon)
       return;
-    const w = this._widthFor(state);
-    const h = SIZE[state][1];
+    const w = this._capFor(level, content);
+    const h = this._heightFor(level, content);
     const [x, y] = this._anchor(w);
     // Geometri ikut dicetak di log morph: tanpa ini island yang teralokasi di
     // luar layar / opacity 0 tidak bisa dibedakan dari island yang tidak jalan.
@@ -498,16 +719,16 @@ export default class NoirIslandExtension extends Extension {
       mode: Clutter.AnimationMode.EASE_OUT_QUINT,
     });
     this._progress.set_size(this._progW, PROGRESS_H);
-    this._fadeTo(state);
-    this._setInput(state !== 'idle');
+    this._fadeTo(level, content);
+    this._setActive(true);
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
   // baru dinaikkan opacity-nya telat, setelah card hampir selesai melebar —
   // pola island yang tumbuh dulu baru menampilkan isinya.
-  _fadeTo(state) {
-    const rows = state === 'media' ? [this._mediaRow, this._progress]
-      : state === 'notif' ? [this._notifRow] : [this._pillRow];
+  _fadeTo(level, content) {
+    const rows = level !== 'card' ? [this._pillRow]
+      : content === 'notif' ? [this._notifRow] : [this._mediaRow, this._progress];
     for (const row of rows) {
       if (!row)
         continue;
@@ -522,6 +743,56 @@ export default class NoirIslandExtension extends Extension {
   }
 
   // ------------------------------------------------------------------ render
+
+  // Klik pill = minta card penuh. Sekaligus membatalkan pengumuman peek: user
+  // sudah melihat cukup untuk memutuskan sendiri.
+  _expand() {
+    if (this._level === 'card')
+      return;
+    this._cardOpen = true;
+    this._peekUntil = 0;
+    this._forced = true;
+    this._render();
+  }
+
+  _collapse() {
+    if (!this._cardOpen)
+      return;
+    this._cardOpen = false;
+    this._render();
+  }
+
+  // Card media ditutup oleh tekanan pointer di mana pun di luar island. Preseden
+  // yang sama dipakai noir-rail: tanpa pushModal, karena grab yang lupa dilepas
+  // membuat desktop tidak bisa diklik sampai logout — terlalu mahal untuk
+  // kenyamanan ini. Kartu notif tidak ikut dipantau: dia punya hold dan tombolnya
+  // sendiri.
+  _armOutside(on) {
+    if (on && !this._outsideId) {
+      this._outsideId = global.stage.connect('captured-event', (stage, event) => {
+        if (event.type() === Clutter.EventType.BUTTON_PRESS &&
+            !this._overIsland(event))
+          this._collapse();
+        return false;
+      });
+    } else if (!on && this._outsideId) {
+      global.stage.disconnect(this._outsideId);
+      this._outsideId = 0;
+    }
+  }
+
+  // Sumber event bisa null (tekanan sintetis/latar), jadi yang diuji geometri
+  // actor-nya, bukan sumber event — sama seperti noir-rail.
+  _overIsland(event) {
+    if (!this._island || !this._island.visible)
+      return true;
+    const [x, y] = event.get_coords();
+    const [ax, ay] = this._island.get_transformed_position();
+    const [aw, ah] = this._island.get_transformed_size();
+    if (![ax, ay, aw, ah].every(Number.isFinite))
+      return true;
+    return x >= ax && x <= ax + aw && y >= ay && y <= ay + ah;
+  }
 
   // Satu-satunya tempat yang memutuskan state mana yang BOLEH tampil. Aturan
   // "isi" di _hasContent() harus dibaca dari sini, bukan dari daftarnya sendiri:
@@ -538,52 +809,148 @@ export default class NoirIslandExtension extends Extension {
     return 'idle';
   }
 
+  // Hasil _decideState boleh ditahan sebentar sebelum benar-benar diterima.
+  // Yang lolos tanpa menunggu: bangun dari kosong, notifikasi apa pun, dan
+  // perintah user. Yang ditahan adalah penurunan (notif -> media, media -> idle)
+  // — persis jalur yang dipakai player yang flap Playing/Paused untuk membuat
+  // card unfold-stow tanpa henti.
+  _debounceState(next) {
+    const now = monoMs();
+    if (next === this._state) {
+      this._wantState = null;
+      return next;
+    }
+    if (this._forced || this._stowed || this._state === 'idle' || next === 'notif') {
+      this._forced = false;
+      this._wantState = next;
+      this._wantAt = now;
+      return next;
+    }
+    if (this._wantState !== next) {
+      this._wantState = next;
+      this._wantAt = now;
+    }
+    const sisa = DWELL_MS - (now - this._wantAt);
+    if (sisa > 0) {
+      // _render() tidak dipanggil tiap tick, jadi kandidat yang sedang ditahan
+      // harus punya alarm sendiri; tanpa ini kartu notif menggantung selamanya
+      // setelah hold-nya kedaluwarsa.
+      if (!this._dwellId) {
+        this._dwellId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(sisa), () => {
+          this._dwellId = 0;
+          this._render();
+          return GLib.SOURCE_REMOVE;
+        });
+      }
+      return this._state;
+    }
+    return next;
+  }
+
+  // Ringkasan isi yang akan tampil. Yang TIDAK ikut: posisi progres dan label
+  // waktu (disuapi _tick() langsung, tanpa lewat render) dan geometri monitor
+  // (dibersihkan lewat _relayout). Jam masuk sebagai menit, bukan detik.
+  _signature(player, state) {
+    if (state === 'notif') {
+      const {src, n} = this._showing;
+      return `notif|${src?.title ?? ''}|${n.title}|${n.body}|${n.urgency}|${this._pending.length}`;
+    }
+    if (state === 'media') {
+      const m = player.meta;
+      return `media|${m.title}|${m.artist}|${m.album}|${player.status}`
+        + `|${player.canPrev}${player.canNext}|${m.key ?? m.title}`;
+    }
+    const resting = player?.meta?.title ? player : null;
+    return `idle|${resting ? resting.meta.title : ''}|${this._pending.length}`;
+  }
+
   _render() {
     if (!this._island)
       return;
     const player = this._pick();
-    const state = this._decideState(player);
-
-    // Tidak ada trek dan tidak ada notifikasi: biarkan island tertidur di dalam
-    // panel. Yang membangunkannya hanya _animateTo lewat _unstash.
+    // Tidak ada trek, tidak ada notifikasi, tidak ada pointer: biarkan island
+    // tertidur di dalam panel. Yang membangunkannya hanya _animateTo lewat
+    // _unstash. Cek ini di depan supaya dwell tidak memasang alarm untuk isi
+    // yang tidak ada.
     if (this._stowed && !this._hasContent(player))
       return;
+    const raw = this._decideState(player);
+    let content = this._debounceState(raw);
+    // State lama yang sedang ditahan bisa kehilangan isinya di tengah dwell
+    // (kartu notif masih dilukis padahal _showing sudah kedaluwarsa). Kalau
+    // tidak ada yang bisa dilukis, terima kandidat barunya.
+    if ((content === 'notif' && !this._showing) || (content === 'media' && !player))
+      content = raw;
+    // Card adalah permintaan eksplisit; kalau isinya sudah jadi idle, tidak ada
+    // lagi yang bisa dibuka.
+    if (content === 'idle')
+      this._cardOpen = false;
 
-    // Baris ditampilkan dan diisi dulu supaya lebar naturalnya terukur dari isi
-    // yang benar-benar akan tampil, bukan dari isi state sebelumnya.
-    this._pillRow.visible = state === 'idle';
-    this._mediaRow.visible = state === 'media';
-    this._progress.visible = state === 'media';
-    this._notifRow.visible = state === 'notif';
+    // Isi dihitung dulu, baru level: _peekUntil yang dipasang di sini adalah
+    // yang membuat level berikutnya jadi 'peek'.
+    const isi = this._signature(player, content);
+    if (isi !== this._isi) {
+      this._isi = isi;
+      if (content !== 'idle')
+        this._peekUntil = monoMs() + PEEK_MS;
+    }
+    const level = this._levelFor(content);
+    if (!level) {
+      this._level = null;
+      // Isi yang habis dibiarkan menempel sampai grace _tick() berhitung (celah
+      // antar trek tidak boleh jadi kedip). Pengumuman yang sudah selesai tidak
+      // punya alasan untuk tetap duduk di layar.
+      if (content !== 'idle')
+        this._stow();
+      return;
+    }
+    this._armOutside(level === 'card' && content === 'media');
 
-    if (state === 'notif')
+    // Jam menit masuk ke kunci lukisan pill, bukan ke signature isi: pill harus
+    // mengganti angkanya sekali semenet, tapi card media tidak boleh tergambar
+    // ulang karena jam.
+    const jam = GLib.DateTime.new_now_local().format('%H:%M');
+    const kunci = level === 'card' ? `${isi}|${level}` : `${isi}|${level}|${jam}`;
+
+    // Isi yang tidak berubah tidak digambar ulang. Tiap set_text memicu request
+    // layout pada card yang sedang di-morph, dan render ulang tanpa perubahan
+    // itulah yang terbaca mata sebagai kedip.
+    if (kunci === this._sig && !this._stowed)
+      return;
+    this._sig = kunci;
+
+    const card = level === 'card';
+    this._pillRow.visible = !card;
+    this._mediaRow.visible = card && content === 'media';
+    this._progress.visible = card && content === 'media';
+    this._notifRow.visible = card && content === 'notif';
+
+    if (card && content === 'notif')
       this._fillNotif();
-    else if (state === 'media')
+    else if (card)
       this._fillMedia(player);
     else
-      this._fillPill(player);
+      this._fillPill(player, content, jam);
 
-    // State bisa sama dengan sebelumnya sementara island sedang tersimpan
-    // (mis. trek berhenti lalu trek lain berhenti): morph tetap jalan supaya
-    // _unstash sempat menurunkan card lagi.
-    if (state !== this._state || this._stowed) {
-      this._animateTo(state);
-      const asal = state === 'media' ? player.identity
-        : state === 'notif' ? String(this._showing?.src?.title ?? '?') : '';
-      log(`noir-island: ${asal ? `${state} <- ${asal}` : state} ${this._geo}`);
-    }
-    this._state = state;
-
-    if (state === 'idle')
-      this._island.remove_style_class_name('noir-island--live');
-    else
-      this._island.add_style_class_name('noir-island--live');
+    // Morph hanya kalau bentuk benar-benar berganti (atau island baru bangun).
+    // Ganti trek di dalam level yang sama menurunkan opacity/isi, bukan ukuran.
+    const bentuk = `${level}|${content}`;
+    if (bentuk !== this._shape || this._stowed)
+      this._animateTo(level, content);
+    const asal = content === 'media' ? player.identity
+      : content === 'notif' ? String(this._showing?.src?.title ?? '?') : '';
+    log(`noir-island: ${asal ? `${content} <- ${asal}` : content} ${level} ${this._geo}`);
+    this._state = content;
+    this._level = level;
+    this._shape = bentuk;
   }
 
-  _fillPill(player) {
-    const resting = player?.meta?.title ? player : null;
-    this._pillKicker.set_text(resting ? 'JEDA' : 'DIAM');
-    this._pillText.set_text(resting ? resting.meta.title : 'sunyi');
+  _fillPill(player, content, jam) {
+    // Pill selalu membawa jam di slot kicker: dialah yang menggantikan jam panel,
+    // jadi island tidak boleh memakan jam lalu menggantinya dengan judul lagu.
+    this._pillKicker.set_text(jam);
+    this._pillText.set_text(content === 'media' ? player.meta.title
+      : GLib.DateTime.new_now_local().format('%a %d %b'));
     // Antrean tetap terlihat saat island diam: notifikasi yang tertahan
     // (fullscreen / DND) tidak boleh hilang tanpa jejak.
     const queued = this._pending.length;
@@ -604,14 +971,35 @@ export default class NoirIslandExtension extends Extension {
     this._mTitle.set_text(m.title);
     this._mArtist.set_text(m.artist || player.identity);
     this._mAlbum.set_text(m.album);
-    this._mAlbum.visible = !!m.album;
+    this._fitText();
     this._setPlayIcon(player.status);
-    this._btnPrev.visible = player.canPrev !== false;
-    this._btnNext.visible = player.canNext !== false;
+    // canControl/canSeek selama ini terbaca di bus lalu dibuang. Sekarang keduanya
+    // dipakai: player yang tidak mau dikendalikan tidak boleh ditawari tombol, dan
+    // rail yang tidak bisa di-seret tidak boleh bereaksi terhadap klik.
+    const boleh = player.canControl !== false;
+    this._btnPrev.visible = boleh && player.canPrev !== false;
+    this._btnNext.visible = boleh && player.canNext !== false;
+    this._btnPlay.visible = boleh;
+    this._progress.reactive = boleh && player.canSeek !== false && !!m.length;
     this._loadCover(m.art, m.key);
     this._updateProgress(player);
     if (ganti)
       this._mediaRow.ease({opacity: 255, duration: FADE_MS, mode: Clutter.AnimationMode.EASE_OUT});
+  }
+
+  // Waktu tidak pernah dikorbankan. "0:12 / 3:30" adalah alasan orang membuka
+  // card media, dan menyembunyikannya terbukti tidak membuat judul panjang
+  // benar-benar muat (rig: judul tetap terpotong, waktunya hilang). Yang mengalah
+  // adalah baris sekunder — album lebih dulu, lalu artis — sesuai urutan
+  // prioritas; judul selalu tinggal sendiri dan memotong dirinya dengan elipsis.
+  _fitText() {
+    const textW = this._capFor('card', 'media') - MEDIA_CHROME_W;
+    const muat = (l) => {
+      const [, nat] = l.get_preferred_width(-1);
+      return !Number.isFinite(nat) || nat <= textW;
+    };
+    this._mAlbum.visible = !!this._mAlbum.text && muat(this._mAlbum);
+    this._mArtist.visible = muat(this._mArtist);
   }
 
   _updateProgress(player) {
@@ -846,6 +1234,8 @@ export default class NoirIslandExtension extends Extension {
       entry.canNext = this._val(props.CanGoNext) !== false;
     if (props.CanGoPrevious !== undefined)
       entry.canPrev = this._val(props.CanGoPrevious) !== false;
+    if (props.CanSeek !== undefined)
+      entry.canSeek = this._val(props.CanSeek) !== false;
     if (props.Metadata !== undefined)
       entry.meta = this._parseMeta(this._val(props.Metadata));
     entry.seen = monoMs();
@@ -886,6 +1276,9 @@ export default class NoirIslandExtension extends Extension {
       album: album ? String(this._val(album)) : '',
       art: String(this._val(meta['mpris:artUrl']) ?? ''),
       length: len ? Number(len) / 1e6 : 0,
+      // path mentah dipakai SetPosition (butuh object path asli); key adalah
+      // bentuk aman untuk nama file cache artwork.
+      path: trackId ? String(trackId) : '',
       key: trackId ? String(trackId).replace(/[^A-Za-z0-9_-]/g, '_') : '',
     };
   }
@@ -912,6 +1305,56 @@ export default class NoirIslandExtension extends Extension {
           conn.call_finish(res);
         } catch (e) {
           // Player menolak metode: status dari PropertiesChanged yang bicara.
+        }
+      });
+  }
+
+  // Seek dimulai dari tekanan pada band progres; rasionya dihitung dari alokasi
+  // actor, jadi pemangkasan lebar di monitor sempit ikut benar.
+  _seekAt(event) {
+    const player = this._pick();
+    const m = player?.meta;
+    if (!player || !m?.length || player.canSeek === false ||
+        player.canControl === false)
+      return false;
+    // get_allocation_box() memakai koordinat orang tua, sedangkan koordinat
+    // event memakai panggung. Memakai yang pertama membuat rasio selalu 1 pada
+    // card yang tidak menempel di x=0 (terbukti di rig: seek ke 212 dtk dari
+    // klik di tengah rail).
+    const [ax] = this._progress.get_transformed_position();
+    const lebar = this._progress.get_allocation_box().get_width();
+    if (lebar <= 0)
+      return false;
+    const [x] = event.get_coords();
+    const ratio = Math.min(1, Math.max(0, (x - ax) / lebar));
+    this._seek(player, ratio * m.length);
+    return true;
+  }
+
+  // SetPosition kalau trackId-nya diketahui, Seek (relatif) kalau tidak. Posisi
+  // akhir tetap milik bus; tulisan lokal di sini cuma supaya rail tidak menunggu
+  // gema satu tick penuh.
+  _seek(player, sec) {
+    const dari = player.status === 'Playing'
+      ? player.pos + (monoMs() - player.posAt) / 1000 : player.pos;
+    const punyaPath = !!player.meta.path;
+    const method = punyaPath ? 'SetPosition' : 'Seek';
+    const params = punyaPath
+      ? new GLib.Variant('(ox)', [player.meta.path, Math.round(sec * 1e6)])
+      : new GLib.Variant('(x)', [Math.round((sec - dari) * 1e6)]);
+    player.pos = sec;
+    player.posAt = monoMs();
+    this._updateProgress(player);
+    log(`noir-island: seek ${mmss(dari)} -> ${mmss(sec)}`);
+    Gio.DBus.session.call(player.name, MPRIS_PATH, PLAYER_IFACE, method, params,
+      null, Gio.DBusCallFlags.NONE, DBUS_TIMEOUT_MS, null, (conn, res) => {
+        try {
+          conn.call_finish(res);
+        } catch (e) {
+          // Player menolak: minta posisi sebenarnya kembali, jangan biarkan rail
+          // berpura-pura sudah pindah.
+          log(`noir-island: ${method} ditolak`);
+          this._samplePosition(player);
         }
       });
   }
@@ -1053,6 +1496,9 @@ export default class NoirIslandExtension extends Extension {
     }
     if (!this._showing)
       this._surface();
+    // Tutup manual = perintah user, bukan fluktuasi isi: state berikutnya harus
+    // langsung diterima, tidak boleh ditahan dwell.
+    this._forced = true;
     this._render();
   }
 
@@ -1104,6 +1550,14 @@ export default class NoirIslandExtension extends Extension {
     if (++this._scanEvery >= SCAN_TICKS) {
       this._scanEvery = 0;
       this._scan();
+    }
+    // Pengumuman kedaluwarsa: peek turun ke pill, atau island tidur kalau
+    // pointer tidak pernah ikut datang. Tick 500 ms sudah cukup murah untuk
+    // jadi satu-satunya jam peek, timer kedua cuma menambah jalur yang bisa
+    // bocor saat disable().
+    if (this._peekUntil && monoMs() >= this._peekUntil) {
+      this._peekUntil = 0;
+      this._render();
     }
     if (this._showing && monoMs() >= this._showing.until) {
       this._showing = null;
