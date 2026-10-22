@@ -853,6 +853,19 @@ export default class NoirIslandExtension extends Extension {
     }));
   }
 
+  // Antrean selalu tersortir urgensi turun, dan sisipnya memakai "<" ketat
+  // sehingga sesama urgensi tetap FIFO. `_surface()` tinggal mengambil kepala;
+  // kalau tidak tersortir, critical yang baru masuk harus menunggu satu hold
+  // penuh di belakang yang dia singkirkan sendiri.
+  _enqueue(item) {
+    let i = this._pending.length;
+    while (i > 0 && this._pending[i - 1].n.urgency < item.n.urgency)
+      i--;
+    this._pending.splice(i, 0, item);
+    while (this._pending.length > QUEUE_MAX)
+      this._pending.pop();
+  }
+
   _onNotify(src, n) {
     this._hook(n);
     if (this._showing?.n === n || this._pending.some(x => x.n === n))
@@ -860,15 +873,15 @@ export default class NoirIslandExtension extends Extension {
     if (this._dndOff())
       return;
 
-    this._pending.push({src, n});
-    while (this._pending.length > QUEUE_MAX)
-      this._pending.shift();
+    this._enqueue({src, n});
 
-    // Yang lebih urgent menyingkirkan yang sedang tampil; yang lama antre lagi
-    // di depan supaya tidak hilang.
+    // Yang lebih urgent menyingkirkan yang sedang tampil; yang lama masuk
+    // kembali lewat sisip yang sama, jadi ia tidak hilang dan tidak ikut
+    // mendorong antrean.
     if (this._showing && n.urgency > this._showing.n.urgency) {
-      this._pending.unshift({src: this._showing.src, n: this._showing.n});
+      const lama = this._showing;
       this._showing = null;
+      this._enqueue({src: lama.src, n: lama.n});
     }
     if (!this._showing)
       this._surface();

@@ -155,9 +155,11 @@ sumber data, jadi keduanya diukur lebih dulu sebelum satu baris pun ditulis:
 
 Prioritasnya tetap NOTIF > MEDIA > IDLE, dan island tidak naik selama jendela
 fullscreen — kecuali urgensi critical. Rosso hanya untuk yang sedang terjadi
-(TIER 0): titik hidup, batang progres, sorot tombol Tutup.
+(TIER 0): titik hidup, batang progres, rel kiri kartu notifikasi, kicker yang
+berdarah, lingkaran play, dan pil Buka. Tombol Tutup tetap ghost — rosso hanya
+muncul saat disorot, supaya "membuka" tidak terlihat sama dengan "membuang".
 
-Empat hal yang tidak bisa ditebak dan hanya ketahuan dari rig:
+Enam hal yang tidak bisa ditebak dan hanya ketahuan dari rig:
 
 - **Nilai `a{sv}` bersarang.** Variant bertipe `v` membungkus Variant aslinya,
   jadi satu `unpack()` menyisakan objek, dan `PlaybackStatus` tidak pernah
@@ -178,6 +180,26 @@ Empat hal yang tidak bisa ditebak dan hanya ketahuan dari rig:
   di GJS 1.80, dan `load_contents_finish` mengembalikan `Uint8Array`, bukan
   `GLib.Bytes`. Jalur yang jalan: bytes → `GLib.Bytes.new` → pixbuf diskala →
   simpan PNG ke `$XDG_CACHE_HOME/noir-island/` → `background-image` di CSS.
+- **Antrean harus tersortir urgensi, bukan urutan datang.** Semula notifikasi
+  masuk lewat `push()` dan `_surface()` mengambil `shift()`, sementara yang
+  digeser masuk lewat `unshift()`. Akibatnya critical yang baru datang justru
+  berdiri di belakang notifikasi biasa yang baru saja ia singkirkan: rig
+  mencatat `surf Normal u=1` dua kali dan `surf Kritis` tidak pernah muncul —
+  pesan "tekanan ban rendah" menunggu satu hold penuh. Enum shell
+  `LOW:0 NORMAL:1 HIGH:2 CRITICAL:3` (dibongkar lewat tambatan log, bukan dari
+  spesifikasi freedesktop yang nomornya berbeda), dan `_enqueue()` menyisip di
+  depan item berurgensi lebih rendah dengan `<` ketat, jadi sesama urgensi
+  tetap FIFO dan antrean yang penuh membuang ekor = yang paling tidak penting.
+- **`disable()` tidak teruji sampai extension benar-benar dimatikan.** Selama
+  satu sesi ia hanya sekali dipanggil saat shell tutup. Menyalakan ulang lewat
+  `gnome-extensions disable/enable` di sesi live memunculkan `TypeError` di
+  `for (const [n, id] of this._hooked.values())`: Map itu memeta notifikasi ke
+  **id sinyal** (angka), jadi `.values()` mengeluarkan satu angka yang tidak
+  bisa dibongkar menjadi pasangan. Throw di tengah `disable()` lebih berbahaya
+  daripada error-nya sendiri — `removeChrome`, `destroy()` actor, dan
+  `run_dispose()` proxy MPRIS ada di bawah baris itu dan tidak pernah jalan,
+  sehingga island lama bocor dan shell menandai extension `state: ERROR` yang
+  hanya pulih setelah logout/login.
 
 Dua keputusan bentuk:
 
