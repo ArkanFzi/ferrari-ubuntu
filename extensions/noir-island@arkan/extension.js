@@ -45,6 +45,7 @@ const STOW_GRACE_MS = 4000;
 const RAIL_MS = 200;
 const HOLD_MS = 8000;
 const HOLD_HIGH_MS = 20000;
+const HOLD_CRITICAL_MS = 45000;
 const TICK_MS = 500;
 const DBUS_TIMEOUT_MS = 400;
 const QUEUE_MAX = 8;
@@ -82,6 +83,7 @@ export default class NoirIslandExtension extends Extension {
     // isi; yang pertama membangunkannya adalah trek atau notifikasi.
     this._stowed = true;
     this._stowAt = 0;
+    this._geo = '';
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -451,6 +453,10 @@ export default class NoirIslandExtension extends Extension {
     this._stowed = false;
     this._stowAt = 0;
     const island = this._island;
+    // Sisa transisi _stow() masih menggenggam opacity dan tinggi actor. Kalau
+    // tidak dilepas, island naik dengan opacity 0: tetap teralokasi dan tetap
+    // terbaca sebagai SHOWING, tapi tidak satu pun pixel-nya tampil.
+    island.remove_all_transitions();
     island.visible = true;
     island.set_opacity(255);
     island.set_size(w, 0);
@@ -465,6 +471,9 @@ export default class NoirIslandExtension extends Extension {
     const w = this._widthFor(state);
     const h = SIZE[state][1];
     const [x, y] = this._anchor(w);
+    // Geometri ikut dicetak di log morph: tanpa ini island yang teralokasi di
+    // luar layar / opacity 0 tidak bisa dibedakan dari island yang tidak jalan.
+    this._geo = `${w}x${h} @${x},${y} panel=${Math.round(Main.panel.height || 0)}`;
     this._progW = Math.max(0, w - 2 * PROG_INSET);
     this._unstash(w, x, y);
     this._island.ease({
@@ -541,7 +550,7 @@ export default class NoirIslandExtension extends Extension {
       this._animateTo(state);
       const asal = state === 'media' ? player.identity
         : state === 'notif' ? String(this._showing?.src?.title ?? '?') : '';
-      log(`noir-island: ${asal ? `${state} <- ${asal}` : state}`);
+      log(`noir-island: ${asal ? `${state} <- ${asal}` : state} ${this._geo}`);
     }
     this._state = state;
 
@@ -989,14 +998,26 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _surface() {
-    if (this._showing || this._dndOff() || !this._pending.length)
+    // DND aktif: antrean yang tertinggal dibuang, bukan ditahan. Kalau tidak,
+    // _pending tetap terisi selamanya dan _hasContent() tidak pernah memberi
+    // izin tidur.
+    if (this._dndOff()) {
+      this._pending = [];
+      return;
+    }
+    if (this._showing || !this._pending.length)
       return;
     const item = this._pending.shift();
-    const hold = item.n.urgency >= Urgency.HIGH ? HOLD_HIGH_MS : HOLD_MS;
+    const urgency = item.n.urgency;
+    // Critical tidak kedaluwarsa menurut freedesktop, tapi tanpa batas island
+    // jadi sandera satu kartu: media dan notif berikutnya tidak pernah tampil
+    // lagi dan tidak ada satu pun log baru. Batas panjang tapi nyata.
+    const hold = urgency >= Urgency.CRITICAL ? HOLD_CRITICAL_MS
+      : urgency >= Urgency.HIGH ? HOLD_HIGH_MS : HOLD_MS;
     this._showing = {
       src: item.src,
       n: item.n,
-      until: monoMs() + (item.n.urgency >= Urgency.CRITICAL ? Infinity : hold),
+      until: monoMs() + hold,
     };
   }
 

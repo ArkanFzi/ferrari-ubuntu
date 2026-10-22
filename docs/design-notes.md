@@ -284,7 +284,45 @@ sedang tampil / masih mengantre.
   mengembalikan NaN untuk actor yang tidak punya request ukuran eksplisit —
   hasilnya semua klik `NaN,NaN` dan enam fase "gagal" padahal produknya benar
   (diagnostik menunjukkan actor mapped dan teralokasi). Pusat klik diambil dari
-  `get_allocation_box()`.
+  `get_allocation_box()`. Probe tombol juga harus mencetak alasan `continue`-nya:
+  sampled 400 ms setelah morph, ia bisa mengambil saat state sudah berganti
+  (baris media memang `mapped=false` di state `idle`) dan produk yang hijau
+  terbaca merah.
+
+### Island yang hidup tapi tidak terlihat: diagnosis sesi live
+
+Laporan "sudah play Spotify, tidak muncul apa-apa" tidak bisa dijawab dari log
+state saja, dan Ubuntu memblokir dua jalur pintas: `org.gnome.Shell.Eval`
+(session mode `ubuntu` → `false, ""`) dan `org.gnome.Shell.Screenshot`
+(Access denied untuk caller tanpa app id). Yang tersisa dan ternyata cukup:
+
+- **Pohon aksesibilitas.** `gsettings set org.gnome.desktop.interface
+  toolkit-accessibility true` membuat shell membangun AtkObject untuk semua
+  actor, dan `Atspi` (python3-gi) bisa membacanya dari luar: extents per actor,
+  dan state `VISIBLE`/`SHOWING`. Hasilnya: island live **teralokasi benar**
+  (`734,28 452x67`, tombol Buka/Tutup `SHOWING`) — jadi bukan geometry, bukan
+  chrome layer, bukan tumpukan uiGroup. Ganti `false` lagi setelah selesai.
+- **Rig cermin.** Menyalin `~/.config/dconf/user` + seluruh direktori extension
+  user ke sesi Xephyr terpisah membuktikan tema WhiteSur, blur-my-shell, DING,
+  dan noir-clock/telemetry tidak mengganggu: card tergambar utuh di screenshot.
+- **Penyebab sebenarnya ada di log, bukan di pixel.** `until: Infinity` untuk
+  notifikasi **critical** (urgency 3 tidak punya timeout dari pengirim) membuat
+  satu kartu mem-*pin* state `notif` selamanya: media dan notif berikutnya tidak
+  pernah tampil lagi, dan karena statenya tidak berubah, **tidak ada satu baris
+  log pun** — island yang hidup tapi diam terlihat persis seperti island yang
+  hilang. Critical sekarang dibatasi `HOLD_CRITICAL_MS` 45 dtk; terverifikasi di
+  rig (lepas setelah 45,3 dtk, media kembali tampil).
+- **Antrean yang tersangkut membuat island tidak pernah tidur.** `_surface()`
+  berhenti kalau DND aktif; item yang sudah terlanjur mengantre tetap dihitung
+  `_hasContent()` sehingga jam mundur `stow` tidak pernah mulai. Sekarang
+  `_surface()` membuang antrean saat DND aktif — notif tetap ada di message
+  list shell, hanya tidak ditahan island.
+- **`remove_all_transitions()` saat bangun.** Sisa `ease()` milik `_stow()`
+  masih menggenggam `opacity` dan `height` actor; `_unstash()` yang hanya
+  memanggil `set_opacity(255)` akan kalah oleh transisi yang masih berjalan —
+  hasilnya actor mapped, terbaca SHOWING, tapi 0% terlihat. Geometri sekarang
+  ikut dicetak di setiap baris state (`... 452x67 @574,32 panel=32`) supaya
+  sesi live bisa dihakimi dari journal saja.
 
 ## Yang sengaja tidak diubah
 
