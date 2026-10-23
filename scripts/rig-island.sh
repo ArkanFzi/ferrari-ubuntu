@@ -7,10 +7,25 @@
 # pixel yang benar-benar digambar island.
 set -uo pipefail
 
+# Satu rig dalam satu waktu. Semua tahap memakai $RIG dan :11 yang sama, dan
+# tahap bersih-bersih di bawah ini MEMATIKAN Xephyr/gnome-shell yang sedang
+# berjalan: dua rig paralel bukan bersaing, mereka saling membunuh di tengah
+# pengukuran dan yang kalah mengukur puing-puing sesi lain. (Kanvas hitam yang
+# dulu dikira akibat paralel ternyata punya sebab sendiri: lihat pin_jendela.)
+exec 9>/tmp/noir-rig.lock
+flock -n 9 || { echo "ABORT: rig lain masih memegang /tmp/noir-rig.lock"; exit 1; }
+
 RIG=/tmp/noir-rig-r
 DISPLAY_NO=:11
 RES=1280x800
-REPO=/home/arkan/ferrari-ubuntu/extensions/noir-island@arkan
+# Display tempat Xephyr menjalankan jendelanya. Ditangkap sebelum harness
+# meng-export DISPLAY=:11 di bawah.
+HOST_DISPLAY=${DISPLAY:-:1}
+# Root repo diturunkan dari lokasi skrip, bukan dari path absolut: salinan di
+# mesin lain (atau worktree) harus mengukur kode yang ada di depannya, bukan
+# kode di /home/arkan.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+REPO=$ROOT/extensions/noir-island@arkan
 STUB=/home/arkan/.local/share/gnome-shell/extensions/noir-island@arkan/extension.js
 UUID=noir-island@arkan
 
@@ -203,6 +218,10 @@ gsettings set org.gnome.shell.extensions.noir-island idle-hide-ms 6000
 gsettings set org.gnome.shell.extensions.noir-island persistent-pill true
 gsettings set org.gnome.shell.extensions.noir-island hold-normal-ms 2500
 gsettings set org.gnome.shell.extensions.noir-island peek-ms 1500
+# AMBIEN=1 menyalakan provider jam. Rig harus bisa membuktikan kedua sisi
+# sakelar, bukan hanya sisi mati: tanpa ini "ambient=clock" cuma klaim di log.
+echo "AMBIEN=${AMBIEN:-0}"
+[ "${AMBIEN:-0}" = "1" ] && gsettings set org.gnome.shell.extensions.noir-island ambient-clock true
 dconf dump /
 SEED
 HOME=$RIG/home XDG_CONFIG_HOME=$RIG/home/.config XDG_DATA_HOME=$RIG/home/.local/share \
@@ -255,6 +274,38 @@ EOF
 
 Xephyr $DISPLAY_NO -screen $RES -no-host-grab >/dev/null 2>&1 &
 XP=$!
+
+# Xephyr cuma jendela di HOST_DISPLAY. Kalau WM inangnya menaruh jendela itu di
+# luar layar (terukur: -1480,75 di host 1920x1080 = seluruhnya terpotong),
+# mutter --x11 melihat stage-nya tidak terlihat dan BERHENTI MELUKIS: shell dan
+# extension tetap hidup, log tetap jalan, tapi x11grab membaca hitam pekat dan
+# seluruh assertion pixel mati tanpa suara. Diperbaiki dengan memaksa jendela
+# kembali ke 0,0, bukan dengan menyalakan DPMS (percobaan yang sudah dilalui).
+pin_jendela() {
+  local wid desk
+  for i in $(seq 20); do
+    wid=$(DISPLAY=$HOST_DISPLAY xdotool search --class Xephyr 2>/dev/null | tail -1)
+    [ -n "$wid" ] && break
+    sleep 0.2
+  done
+  [ -z "$wid" ] && { echo "  pin: jendela Xephyr tidak ketemu"; return 1; }
+  desk=$(DISPLAY=$HOST_DISPLAY xprop -root _NET_CURRENT_DESKTOP 2>/dev/null \
+         | sed -n 's/.*# \([0-9]*\)/\1/p')
+  DISPLAY=$HOST_DISPLAY wmctrl -ir "$wid" -b remove,hidden,minimized 2>/dev/null
+  DISPLAY=$HOST_DISPLAY xdotool set_desktop_for_window "$wid" "${desk:-0}" 2>/dev/null
+  DISPLAY=$HOST_DISPLAY xdotool windowmap windowraise "$wid" 2>/dev/null
+  DISPLAY=$HOST_DISPLAY xdotool windowmove "$wid" 0 0 2>/dev/null
+  echo "  pin wid=$wid $(DISPLAY=$HOST_DISPLAY xwininfo -id "$wid" -stats 2>/dev/null \
+    | tr -s ' \n' ' ' | sed -n 's/.*Absolute upper-left X: \([0-9-]*\).*Absolute upper-left Y: \([0-9-]*\).*Map State: \([A-Za-z]*\).*/x=\1 y=\2 \3/p')"
+}
+pin_jendela
+# Dipakai di jalur ABORT juga: keluar tanpa membersihkan meninggalkan Xephyr +
+# gnome-shell --x11 yang memegang :11, dan run berikutnya mengukur puing-puing.
+bersih() {
+  kill $XP 2>/dev/null
+  for p in $(pgrep -f 'gnome-[s]hell --x11' 2>/dev/null); do kill "$p" 2>/dev/null; done
+  pkill -x Xephyr 2>/dev/null
+}
 # Harness HARUS menggerakkan pointer di dalam Xephyr, bukan di sesi nyata user.
 export DISPLAY=$DISPLAY_NO
 sleep 2
@@ -281,6 +332,27 @@ PY
 
 ok=0; gagal=0
 check() { if [ "$2" = OK ]; then echo "$1: OK"; ok=$((ok+1)); else echo "$1: GAGAL ($3)"; gagal=$((gagal+1)); fi; }
+
+# pixel TERANG (teks/ikon) di dalam suatu kotak. Yang dihitung adalah luminans
+# netral, bukan "apa pun yang bukan hijau": body card hitam pekat 460x72 sudah
+# 100% non-hijau, jadi hit() tidak pernah bisa membedakan card berisi dari card
+# kosong — persis lubang yang membuat regresi opacity bulan ini lolos tiga
+# putaran tes. Terukur di rig: card notif 392 px, card media 493 px, pill 161
+# px, sementara desktop bersih dan island tidur sama-sama 0.
+terang() { python3 - "$@" <<'TERANGPY'
+import sys
+from PIL import Image
+f, x1, y1, x2, y2 = sys.argv[1], *[int(v) for v in sys.argv[2:6]]
+im = Image.open(f).convert('RGB')
+n = 0
+for y in range(y1, y2):
+    for x in range(x1, x2):
+        r, g, b = im.getpixel((x, y))
+        if r > 105 and g > 105 and b > 105:
+            n += 1
+print(n)
+TERANGPY
+}
 
 say() { echo "### $*"; }
 
@@ -311,6 +383,9 @@ sys.exit(0 if all(im.getpixel(p) == (0, 255, 0)
 PY
 }
 bangunkan() {
+  # Lihat pin_jendela: jendela yang terdorong keluar layar membuat shell berhenti
+  # melukis, dan itu tidak bisa disembuhkan dari dalam :11.
+  pin_jendela
   # Layar rig bisa HITAM PEKAT: shell minta DPMS ke Xephyr yang tidak punya
   # ekstensi itu ("Xlib: extension DPMS missing on display :11"), dan tanpa
   # systemd (idle hint gagal) layar dianggap idle. Sekaligus keluar dari
@@ -320,6 +395,17 @@ bangunkan() {
   xset -display "$DISPLAY_NO" dpms force on 2>/dev/null
   xset -display "$DISPLAY_NO" s reset 2>/dev/null
   xdotool key Escape; sleep 0.4
+  # Damage yang SUNGGUHAN. Shell X11 tidak melukis satu frame pun sampai ada
+  # yang mengubah panggungnya: pointer-warps dan klik di wallpaper tidak mengubah
+  # apa pun secara visual, jadi kanvas tetap hitam pekat walau shell dan island
+  # hidup dan mencatat log. Terukur pada sesi yang sama, hitam sepanjang 25 dtk:
+  # Super+Escape -> 0 px non-hitam; satu jendela sementara dipeta lalu dibunuh
+  # -> 921.888 px hijau + panel. Jendela kecil di sudut kanan-bawah (di luar
+  # semua titik uji) adalah alarm satu-satunya yang terbukti.
+  xeyes -geometry 64x48+1180+740 >/dev/null 2>&1 &
+  local sw=$!
+  sleep 1.2
+  kill $sw 2>/dev/null
   # Klik jauh di kanan bawah: wallpaper kosong di sana, dan klik pada
   # kanvas adalah satu-satunya cara menutup overview tanpa Eval.
   xdotool mousemove 1150 620 click 1; sleep 0.6
@@ -362,6 +448,7 @@ else
     sleep 2
   done
   echo "  shell.out:"; tail -12 "$RIG/shell.out" | sed "s/^/    /"
+  bersih
   exit 1
 fi
 
@@ -420,6 +507,15 @@ RAILPY
 )
 [ "${RAIL:-0}" -ge 25 ] && check R1B-RAIL-ROSSO OK || check R1B-RAIL-ROSSO GAGAL "$RAIL baris merah di tepi kiri card notif"
 
+# R1C: card notifikasi HARUS membawa teks. R1/R1B membuktikan permukaannya ada
+# dan rel-nya menyala; keduanya tetap hijau pada card yang seluruh isinya hitam.
+# Kotak 64..330, bukan selebar card: terukur di kartu rig, kolom terang duduk di
+# 37-52 (ikon), 74-142 (title+body), 351-435 (Tutup/Buka). Ikon dan tombol harus
+# dihindari — keduanya tetap terang waktu teksnya hilang, dan probe membuktikan
+# kotak selebar card lolos (307 px) dengan kicker+title+body dikosongkan.
+TN=$(terang "$RIG/shots/kartu.png" $((GX + 64)) $((GY + 6)) $((GX + 330)) $((GY + GH - 2)))
+[ "${TN:-0}" -ge 60 ] && check R1C-TEKS-NOTIF OK || check R1C-TEKS-NOTIF GAGAL "hanya $TN px terang di body ${GW}x${GH}"
+
 tidur_island || echo "  (island tidak masuk liang: $(baris_terakhir))"
 
 # ------------------------------------------------------- R1A baseline saat tidur
@@ -436,6 +532,34 @@ read -r PW PH PX PY _ <<<"$(geo)"
 HT=$(hit "$RIG/shots/hover-tepi.png" $PX $((PY + 2)) $((PX + PW)) $((PY + PH)))
 HPCT=$((HT * 100 / (PW * PH)))
 [ "$HPCT" -gt 55 ] && check R2-HOVER-TEPI OK || check R2-HOVER-TEPI GAGAL "pill di x=-200 tidak bangun ($HPCT% dari ${PW}x${PH}, geometri ${PX},${PY})"
+
+# R2C: default slot ambient. Yang diuji di sini justru kekosongannya. Sebelum
+# registry ini ada, pil idle selalu membawa "17:36 | Fri 23 Oct" — angka yang
+# sama persis dengan yang duduk 30 px di atasnya, dan tidak ada satu pun notch
+# app yang dirilis memakai jam sebagai konten idle. Dua arah kegagalan yang
+# harus dibedakan: ambient bukan '-' (sakelarnya default nyala) atau ambient
+# '-' tapi pil tetap membawa pixel terang (masih ada jalur yang melukis jam).
+AK=$(grep -a 'noir-island: idle pill' "$RIG/shell.out" | tail -1 \
+  | sed -n 's/.*ambient=\([^ ]*\).*/\1/p')
+TC=$(terang "$RIG/shots/hover-tepi.png" $((PX + 8)) $((PY + 4)) $((PX + PW - 8)) $((PY + PH - 2)))
+if [ "${AMBIEN:-0}" = "1" ]; then
+  # Sisi hidup sakelar: pil idle HARUS bawa teks provider, dan buktinya pixel,
+  # bukan cuma log — log "ambient=clock" tetap hijau kalau _fillPill lupa
+  # memanggil nilai().
+  if [ "$AK" != "clock" ]; then
+    check R2C-AMBIENT-JAM GAGAL "ambient=$AK, harusnya clock"
+  elif [ "${TC:-0}" -lt 40 ]; then
+    check R2C-AMBIENT-JAM GAGAL "ambient=clock tapi pil idle cuma $TC px terang"
+  else
+    check R2C-AMBIENT-JAM OK
+  fi
+elif [ "$AK" != '-' ]; then
+  check R2C-AMBIENT-KOSONG GAGAL "ambient=$AK, default harus kosong"
+elif [ "${TC:-0}" -ge 20 ]; then
+  check R2C-AMBIENT-KOSONG GAGAL "ambient=- tapi pill idle $TC px terang"
+else
+  check R2C-AMBIENT-KOSONG OK
+fi
 
 # ------------------------------ R2B titik di luar zona (x=-300) tidak membangunkan
 tidur_island || echo "  (sebelum R2B island belum tidur: $(baris_terakhir))"
@@ -460,6 +584,9 @@ tunggu_log "+ player" || { echo "  (player: $(head -2 "$RIG/player.out"))"; }
 xdotool mousemove $CUT $((POKOK + 20)); sleep 0.3
 tunggu_log "media .* pill" && sleep 0.5 || echo "  (pill media tidak muncul: $(baris_terakhir))"
 read -r QW QH QX QY _ <<<"$(geo)"
+shot "$RIG/shots/media-pill.png"
+QP=$(terang "$RIG/shots/media-pill.png" $((QX + 8)) $((QY + 4)) $((QX + QW - 8)) $((QY + QH - 2)))
+[ "${QP:-0}" -ge 40 ] && check R3-TEKS-PILL OK || check R3-TEKS-PILL GAGAL "pill media hanya $QP px terang dari ${QW}x${QH}"
 xdotool mousemove $((QX + QW / 2)) $((QY + QH / 2)); sleep 0.3
 xdotool click 1; sleep 0.5
 tunggu_log "media .* card" || echo "  (klik pill tidak membuka card: $(baris_terakhir))"
@@ -470,6 +597,8 @@ shot "$RIG/shots/media-card.png"
 MC=$(hit "$RIG/shots/media-card.png" $MX $MY $((MX + MW)) $((MY + MH)))
 MCPCT=$((MC * 100 / (MW * MH)))
 [ "$MCPCT" -gt 55 ] && check R3A-MEDIA-CARD OK || check R3A-MEDIA-CARD GAGAL "card media $MCPCT% dari ${MW}x${MH} ($MC px)"
+TM=$(terang "$RIG/shots/media-card.png" $((MX + 10)) $((MY + 4)) $((MX + MW - 10)) $((MY + MH - 16)))
+[ "${TM:-0}" -ge 60 ] && check R3A-TEKS-MEDIA OK || check R3A-TEKS-MEDIA GAGAL "card media hanya $TM px terang"
 
 # ------------- R4 jalur seek: fill merah harus ADA dan harus BERTAMBAH
 # Rel progress ada di media card (PROGRESS_H 12 px di dasar card), sementara
@@ -534,7 +663,5 @@ echo "== lolos=$ok gagal=$gagal jserr=$JS"
 echo "== log island:"
 grep -a "noir-island" "$RIG/shell.out" | tail -22 | sed 's/^/  /'
 
-kill $XP 2>/dev/null
-for p in $(pgrep -f 'gnome-[s]hell --x11' 2>/dev/null); do kill "$p" 2>/dev/null; done
-pkill -x Xephyr 2>/dev/null
+bersih
 exit 0
