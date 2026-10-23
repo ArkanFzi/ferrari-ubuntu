@@ -256,8 +256,9 @@ scripts/hot-island.sh --dry-run   # cetak rencana
 ```
 
 Script itu menolak publish kalau `node --check` gagal, menyalin
-`stylesheet.css` ke folder terpasang (CSS dibaca shell dari
-`extension.dir` setiap enable — `extensionSystem.js:126-143`), lalu
+`stylesheet.css` dan `schemas/` ke folder terpasang (keduanya dibaca shell dari
+`extension.dir` setiap enable — `extensionSystem.js:126-143`; schema dikompilasi
+ulang dengan `glib-compile-schemas`), lalu
 `gnome-extensions disable` + `enable`. Build lama dipangkas, 8 terakhir disimpan.
 
 Bukti di rig Xephyr (shell yang sama, tanpa restart):
@@ -269,7 +270,9 @@ B-SHELL-TIDAK-RESTART: OK (pid 880462 masih hidup)
 C-NOTIF-MASIH-HIDUP:  OK (notif <- notify-send card 460x72 @570,32)
 ```
 
-Yang **tetap** butuh logout: menambah kunci gsettings baru ke schema yang sudah
-terpasang, dan perubahan pada stub `extension.js` itu sendiri (dia satu-satunya
-berkas yang di-cache selamanya oleh shell). Kalau setelah reload island terlihat
-aneh, `--rollback` lebih dulu, baru logout.
+Yang **tetap** butuh logout: perubahan pada stub `extension.js` itu sendiri (dia
+satu-satunya berkas yang di-cache selamanya oleh shell). Menambah kunci gsettings
+baru ternyata **tidak** — keyakinan lama itu dibantah `idle-hide-ms`: `.xml`
+dikopi + dikompilasi ke folder terpasang, disable/enable, dan shell yang sama
+langsung membaca kunci baru itu (island tidur 6 dtk setelah dibiarkan).
+Kalau setelah reload island terlihat aneh, `--rollback` lebih dulu, baru logout.

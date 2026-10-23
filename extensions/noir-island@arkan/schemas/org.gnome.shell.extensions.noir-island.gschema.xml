@@ -56,5 +56,15 @@
       <description>Selama ini island melebar penuh setelah isi baru tiba, lalu
         mundur sendiri ke pill.</description>
     </key>
+
+    <key name="idle-hide-ms" type="i">
+      <range min="0" max="300000"/>
+      <default>6000</default>
+      <summary>Tidur setelah island dibiarkan</summary>
+      <description>Tanpa aksi pointer selama ini, island menutup total — pill
+        media ikut tidur, dan hanya pointer yang datang dekat panel atau
+        notifikasi baru yang membangunkannya lagi. Nol = island tidak pernah
+        tidur selama ada trek.</description>
+    </key>
   </schema>
 </schemalist>

@@ -1,10 +1,10 @@
 {
   "uuid": "noir-island@arkan",
   "name": "Noir Island",
-  "description": "Island melayang di tengah atas: pill melekat selama ada trek (termasuk yang dijeda) dan diklik untuk membuka kartu now-playing dari MPRIS (judul, artis, artwork, tombol transport), didahulukan kartu notifikasi dengan tombol Buka/Tutup. Prioritas NOTIF > MEDIA > IDLE; tidak naik selama ada jendela fullscreen atau mode jangan-ganggu. Masa tampil dan perilaku pill/paused diatur lewat gsettings.",
+  "description": "Island menggantung di tengah atas: pill melekat selama ada trek (termasuk yang dijeda) dan diklik untuk membuka kartu now-playing dari MPRIS (judul, artis, artwork, tombol transport), didahulukan kartu notifikasi yang membawa tombolnya sendiri (Tutup/Buka, atau aksi kiriman notifikasi seperti Show in Files pada screenshot). Prioritas NOTIF > MEDIA > IDLE; island tidur total setelah dibiarkan dan bangun saat pointer datang dekat panel; tidak naik selama ada jendela fullscreen atau mode jangan-ganggu. Masa tampil, tidur, dan perilaku pill/paused diatur lewat gsettings.",
   "settings-schema": "org.gnome.shell.extensions.noir-island",
   "shell-version": [
     "46"
   ],
-  "version": 3
+  "version": 4
 }

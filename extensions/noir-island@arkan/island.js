@@ -63,6 +63,7 @@ const OPT = {
   'hold-critical-ms': 'holdCritical',
   'hold-hover-extra-ms': 'holdHoverExtra',
   'peek-ms': 'peekMs',
+  'idle-hide-ms': 'idleHide',
 };
 // Hover dibaca lewat polling global.get_pointer(), bukan captured-event MOTION
 // (di X11 tidak terkirim ke stage saat klien memegang pointer grab, jadi mati
@@ -92,6 +93,11 @@ const QUEUE_MAX = 8;
 // hidup.
 const BLIND_RETRY_MAX = 10;
 const BODY_MAX = 160;
+// Aksi bawaan notifikasi ikut dijadikan tombol (screenshot mengirim
+// "Show in Files"), dibatasi dua supaya baris tombol tidak menggeser kolom
+// teks, dan labelnya dipotong pada 18 karakter.
+const ACT_MAX = 2;
+const ACT_LABEL_MAX = 18;
 const SCAN_TICKS = 4;
 // Di bawah angka ini card tidak bisa memuat apa pun yang terbaca.
 const MIN_W = 200;
@@ -170,6 +176,9 @@ export class Island {
     this._hoverOut = 0;
     this._hoverId = 0;
     this._peekUntil = 0;
+    // Batas "masih ada yang terjadi": selama jam ini hidup, pill media boleh
+    // menempel; setelahnya island tidur walau trek masih berputar.
+    this._wakeUntil = 0;
     this._cardOpen = false;
     this._outsideId = 0;
     this._active = null;
@@ -252,12 +261,13 @@ export class Island {
       ids.forEach(id => src.disconnect(id));
     this._watched.clear();
 
-    // Handler destroy menempel pada notifikasi milik shell, jadi ikut dilepas
+    // Handler di atas menempel pada notifikasi milik shell, jadi ikut dilepas
     // supaya tidak memanggil _render() setelah extension mati. Yang diiterasi
-    // adalah pasangan [notifikasi, id] milik Map itu sendiri — .values() hanya
-    // mengeluarkan id (angka), dan menghancurkan sisa disable() di bawahnya.
-    for (const [n, id] of this._hooked)
-      n.disconnect(id);
+    // adalah pasangan [notifikasi, daftar-id] milik Map itu sendiri —
+    // .values() hanya mengeluarkan daftar id, dan menghancurkan sisa disable()
+    // di bawahnya.
+    for (const [n, ids] of this._hooked)
+      ids.forEach(id => n.disconnect(id));
     this._hooked.clear();
 
     this._pending = [];
@@ -459,9 +469,17 @@ export class Island {
       'noir-island-btn--stop');
     this._btnOpen = this._textButton('Buka', () => this._openTarget(),
       'noir-island-btn--go');
+    // Tombol kiriman notifikasi sendiri ("Show in Files" pada screenshot),
+    // disisip di antara Tutup dan Buka supaya kolom aksi tetap satu baris.
+    this._actBox = new St.BoxLayout({
+      style_class: 'noir-island-acts',
+      y_align: Clutter.ActorAlign.CENTER,
+      visible: false,
+    });
     const btns = new St.BoxLayout({style_class: 'noir-island-actions'});
     btns.add_child(this._badge);
     btns.add_child(this._btnClose);
+    btns.add_child(this._actBox);
     btns.add_child(this._btnOpen);
 
     this._notifRow.add_child(this._rail);
@@ -658,6 +676,9 @@ export class Island {
         return;
       this._hoverOut = 0;
       this._hoverOn = false;
+      // Pointer pergi = mulai hitung mundur tidur di sini; selama dia masih di
+      // sekitar island, _awake() menahan card tanpa perlu jam diperpanjang.
+      this._wake();
       this._render();
       // Card notif dan card yang dibuka lewat klik tidak ditopang hover, jadi
       // mereka tetap bangun. Hanya pill yang boleh meleleh sekarang juga, tanpa
@@ -703,18 +724,33 @@ export class Island {
     if (content === 'notif')
       return 'card';
     if (content === 'media') {
-      if (this._cardOpen)
+      const bangun = this._awake();
+      if (this._cardOpen && bangun)
         return 'card';
-      if (monoMs() < this._peekUntil)
+      if (bangun && monoMs() < this._peekUntil)
         return 'peek';
       // Pill media tidak lagi bersyarat pointer: yang dijeda harus tetap bisa
-      // diklik. Idle tetap butuh hover — tidak ada apa pun untuk diklik di sana,
-      // dan pill jam permanen cuma menambah satu layar penuh teks.
-      if (this._opt.persistentPill)
+      // diklik — tapi hanya selama island masih bangun. Jam idle yang jatuh
+      // membuat pill ikut tidur; pointer yang datang lagi mengumpulkannya.
+      if (this._opt.persistentPill && bangun)
         return 'pill';
       return this._hoverOn ? 'pill' : null;
     }
     return this._hoverOn ? 'pill' : null;
+  }
+
+  // Ada aksi baru = island boleh menempel lagi `idle-hide-ms`. Hitung mundurnya
+  // dimulai dari sekarang, bukan dari sisa jam sebelumnya, supaya pointer yang
+  // mondar-mandir di dekat panel tidak pernah kehabisan jatah.
+  _wake() {
+    if (!this._opt.idleHide)
+      return;
+    this._wakeUntil = monoMs() + this._opt.idleHide;
+  }
+
+  // idleHide = 0 berarti tidak pernah tidur: pill persisten seperti sebelumnya.
+  _awake() {
+    return !this._opt.idleHide || this._hoverOn || monoMs() < this._wakeUntil;
   }
 
   // Isi = sesuatu yang boleh tampil (aturan ada di _decideState) plus notifikasi
@@ -832,6 +868,7 @@ export class Island {
     this._cardOpen = true;
     this._peekUntil = 0;
     this._forced = true;
+    this._wake();
     this._render();
   }
 
@@ -992,8 +1029,13 @@ export class Island {
     const isi = this._signature(player, content);
     if (isi !== this._isi) {
       this._isi = isi;
-      if (content !== 'idle')
+      if (content !== 'idle') {
         this._peekUntil = monoMs() + this._opt.peekMs;
+        // Isi baru = ada yang diumumkan, jadi jam idle mulai dari sekarang.
+        // Tanpa ini island yang sudah terlanjur tidur tidak pernah bangun lagi
+        // untuk trek berikutnya.
+        this._wake();
+      }
     }
     const level = this._levelFor(content);
     if (!level) {
@@ -1142,6 +1184,7 @@ export class Island {
     this._badge.visible = queued > 0;
     this._badge.set_text(queued > 0 ? `+${queued}` : '');
     this._iconBin.set_child(this._notifIcon(src));
+    this._fillActions(n);
     // Rel rosso adalah gestur masuknya kartu: dialirkan dari tepi atas ke bawah
     // sekali per notifikasi. Baris ini dipanggil ulang tiap ada kejadian lain,
     // jadi animasinya dibedakan lewat identitas notifikasinya, tidak tiap render.
@@ -1154,6 +1197,34 @@ export class Island {
         duration: RAIL_MS,
         mode: Clutter.AnimationMode.EASE_OUT_QUINT,
       });
+    }
+  }
+
+  // Tombol bawaan notifikasi: shell memasang "Show in Files" pada screenshot,
+  // pembuat pesan boleh memasang aksinya sendiri. Dua yang muat terbaca di
+  // satu baris; sisanya tetap tersedia di banner asli.
+  _fillActions(n) {
+    this._actBox.destroy_all_children();
+    const acts = (n.actions || []).slice(0, ACT_MAX);
+    for (const a of acts) {
+      const label = this._oneLine(a.label || '', ACT_LABEL_MAX);
+      if (!label)
+        continue;
+      this._actBox.add_child(this._textButton(
+        label, () => this._invokeAction(n, a), 'noir-island-btn--act'));
+    }
+    this._actBox.visible = this._actBox.get_n_children() > 0;
+    // "Buka" adalah aksi tunggal milik island; begitu notifikasinya punya
+    // tombol sendiri, dua pintu ke satu tempat jadi satu.
+    this._btnOpen.visible = !this._actBox.visible;
+  }
+
+  _invokeAction(n, action) {
+    this._wake();
+    try {
+      action.activate();
+    } catch (e) {
+      log(`noir-island: aksi "${action.label}" gagal: ${e.message}`);
     }
   }
 
@@ -1423,6 +1494,7 @@ export class Island {
     const player = this._pick();
     if (!player)
       return;
+    this._wake();
     Gio.DBus.session.call(player.name, MPRIS_PATH, PLAYER_IFACE, method, null,
       null, Gio.DBusCallFlags.NONE, DBUS_TIMEOUT_MS, null, (conn, res) => {
         try {
@@ -1459,6 +1531,7 @@ export class Island {
   // akhir tetap milik bus; tulisan lokal di sini cuma supaya rail tidak menunggu
   // gema satu tick penuh.
   _seek(player, sec) {
+    this._wake();
     const dari = player.status === 'Playing'
       ? player.pos + (monoMs() - player.posAt) / 1000 : player.pos;
     const punyaPath = !!player.meta.path;
@@ -1579,13 +1652,28 @@ export class Island {
   _hook(n) {
     if (this._hooked.has(n))
       return;
-    this._hooked.set(n, n.connect('destroy', () => {
-      this._hooked.delete(n);
-      this._pending = this._pending.filter(x => x.n !== n);
-      if (this._showing?.n === n)
-        this._showing = null;
-      this._render();
-    }));
+    this._hooked.set(n, [
+      n.connect('destroy', () => {
+        // Notifikasinya sudah mati, jadi handler-nya ikut mati bersama objeknya;
+        // yang perlu dilepas hanyalah entri Map-nya.
+        this._hooked.delete(n);
+        this._pending = this._pending.filter(x => x.n !== n);
+        if (this._showing?.n === n)
+          this._showing = null;
+        this._render();
+      }),
+      // Tombol bisa lahir setelah notifikasinya muncul (shell menambahkan
+      // "Show in Files" pada screenshot), jadi isinya harus ikut dipantau.
+      n.connect('action-added', () => this._onActions(n)),
+      n.connect('action-removed', () => this._onActions(n)),
+    ]);
+  }
+
+  // Diisi ulang tanpa menyentuh mesin state: kartu yang sedang tampil tidak
+  // boleh berkedip hanya karena satu tombol tambahan tiba.
+  _onActions(n) {
+    if (this._showing?.n === n)
+      this._fillActions(n);
   }
 
   // Antrean selalu tersortir urgensi turun, dan sisipnya memakai "<" ketat
@@ -1608,6 +1696,9 @@ export class Island {
     if (this._dndOff())
       return;
 
+    // Island yang sedang tidur dibangunkan oleh notifikasi baru, sama seperti
+    // pointer yang datang dekat panel.
+    this._wake();
     this._enqueue({src, n});
 
     // Yang lebih urgent menyingkirkan yang sedang tampil; yang lama masuk
@@ -1673,6 +1764,7 @@ export class Island {
     const showing = this._showing;
     if (!showing)
       return;
+    this._wake();
     this._showing = null;
     showing.n.activate();
     this._surface();
@@ -1694,6 +1786,16 @@ export class Island {
     // bocor saat disable().
     if (this._peekUntil && monoMs() >= this._peekUntil) {
       this._peekUntil = 0;
+      this._render();
+    }
+    // Jam idle: tanpa aksi, island menutup total — card turun lebih dulu, pill
+    // media ikut tidur. Yang membangunkannya hanya pointer yang datang dekat
+    // panel (lihat _pollHover), notifikasi baru (lihat _onNotify), dan isi baru
+    // (lihat _render); yang tidak membangunkan adalah waktu yang berlalu.
+    if (this._wakeUntil && monoMs() >= this._wakeUntil) {
+      this._wakeUntil = 0;
+      this._peekUntil = 0;
+      this._cardOpen = false;
       this._render();
     }
     // Kartu notif tidak boleh kabur di depan mata: selama pointer berdiri di

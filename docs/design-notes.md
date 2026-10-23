@@ -208,21 +208,46 @@ Dua keputusan bentuk:
   `addChrome({affectsInputRegion})` saat melebar, bukan dengan mengubah
   properti.
 - **Ambang yang bisa dipakai tanpa logout masuk gschema.** Yang dulu konstanta
-  di puncak file dan benar-benar sering diputar sekarang tujuh kunci di
+  di puncak file dan benar-benar sering diputar sekarang delapan kunci di
   `schemas/org.gnome.shell.extensions.noir-island.gschema.xml`
   (`persistent-pill`, `show-when-paused`, `hold-normal-ms` 15 s, `hold-high-ms`
-  20 s, `hold-critical-ms` 45 s, `hold-hover-extra-ms` 30 s, `peek-ms` 3 s),
+  20 s, `hold-critical-ms` 45 s, `hold-hover-extra-ms` 30 s, `peek-ms` 3 s,
+  `idle-hide-ms` 6 s),
   dibaca lewat `getSettings()` dan di-cache di `this._opt` oleh `_syncOpts()`
   yang dipanggil ulang tiap `changed::` — jadi nilainya berubah pada shell yang
   sedang jalan, terbukti dari rig (`D-MATIKAN-PILL`, `D-PAUSED-MATIBERPERILAKU`).
   Yang tinggal konstanta adalah yang tidak pernah perlu ditebak-tebak: geometri
   (`PILL_W`/`MEDIA_W`/`NOTIF_H`, …), `ANIM_MS`/`FADE_MS`/`DWELL_MS`, poll
   (`TICK_MS`, `SCAN_TICKS`, `HOVER_*`), `QUEUE_MAX`, dan `BLIND_RETRY_MAX`.
-  Catatan yang tetap berlaku: **menambah kunci baru** ke schema yang sudah terpasang
-  butuh logout/login sebelum `gsettings` bisa melihatnya; mengubah **nilai** kunci
-  yang sudah ada tidak. Dari terminal, schema extension ini lokal, jadi pakai
+  Catatan lama "menambah kunci baru butuh logout" ternyata hanya berlaku untuk
+  schema yang **tidak** ikut diperbarui: `hot-island.sh` kini mengopi `.xml` dan
+  menjalankan `glib-compile-schemas` ke folder terpasang sebelum disable/enable,
+  dan kunci `idle-hide-ms` yang baru lahir terbaca oleh shell yang sama tanpa
+  logout. Dari terminal, schema extension ini tetap lokal, jadi pakai
   `GSETTINGS_SCHEMA_DIR=~/.local/share/gnome-shell/extensions/noir-island@arkan/schemas`
   (pola yang sama dengan noir-cluster di Troubleshooting §6).
+- **Island tidur, bukan mengecil.** `idle-hide-ms` dulu hanya menutup card; yang
+  dipakai sekarang adalah satu jam `_wakeUntil` yang dijaga `_wake()`/`_awake()`:
+  jatuh tempo berarti `_levelFor()` mengembalikan `null` untuk media, jadi pill
+  ikut `stow` — island hilang total, bukan menyusut. Yang memutar jam: pointer
+  masuk/keluar (`_pollHover`), klik transport/seek/expand/aksi, notifikasi baru
+  (`_onNotify`), dan **isi baru** (cabang `isi !== this._isi` di `_render`).
+  Clause terakhir dulu tidak ada dan itu salah: island yang terlanjur tidur tidak
+  pernah bangun lagi untuk trek berikutnya. Yang tidak memutar jam: waktu yang
+  berlalu dan perubahan posisi progres (posisinya sengaja tidak masuk
+  `_signature`, kalau tidak island tidak akan pernah tidur saat lagu jalan).
+  Nol = perilaku lama, pill menempel terus.
+- **Tombol notifikasi diambil dari notifikasinya sendiri.** Shell memasang
+  "Show in Files" pada screenshot lewat `Notification.addAction`, dan tombol itu
+  lahir di `_actions` milik objek Notification — bukan sesuatu yang bisa
+  dikarang island. `_fillActions()` membaca `n.actions` (maks `ACT_MAX` 2, label
+  dipangkas `_oneLine` ke `ACT_LABEL_MAX` 18 karakter), `_invokeAction()` memanggil
+  `action.activate()`, dan `_hook()` ikut menyambung `action-added`/
+  `action-removed` karena tombol bisa muncul setelah notifikasinya. `_btnOpen`
+  ("Buka", rosso) mundur saat ada tombol sendiri: satu kartu satu CTA. Jalur ini
+  tidak khusus screenshot — `notificationDaemon.js:221` memetakan setiap aksi
+  client (kecuali `default`, yang tetap jadi klik-kartu) ke `addAction` yang
+  sama, jadi tombol kiriman aplikasi pihak ketiga muncul dengan sendernya.
 - **Island dipecah jadi stub + isi supaya UI bisa diganti tanpa logout.**
   Awalnya "perlu logout" dianggap harga yang dibayar untuk GJS; ternyata harga
   itu cuma berlaku untuk *satu path yang di-cache selamanya*. Shell 46 menutup

@@ -8,9 +8,9 @@
 #
 # Cara kerjanya: extension.js yang terpasang hanyalah stub yang memuat island.js
 # dari path di ~/.local/share/noir-island/CURRENT. GJS menyimpan modul per URI,
-# jadi yang diganti adalah path-nya, bukan isinya. CSS tidak lewat jalur ini:
-# shell membacanya dari folder extension setiap enable, jadi stylesheet.css ikut
-# disalin ke folder terpasang.
+# jadi yang diganti adalah path-nya, bukan isinya. CSS dan schema tidak lewat
+# jalur ini: shell membacanya dari folder extension setiap enable, jadi
+# stylesheet.css dan schemas/ ikut disalin (dan dikompilasi) ke folder itu.
 set -uo pipefail
 
 MODE=publish
@@ -50,6 +50,7 @@ show_status() {
 publish() {
   need node "pasang nodejs untuk gerbang sintaks"
   need gnome-extensions "pasang gnome-shell-extension-tools"
+  need glib-compile-schemas "pasang libglib2.0-dev-bin"
   [ -d "$EXTDST" ] || { say "HILANG: $EXTDST — jalankan scripts/install.sh dulu"; exit 1; }
 
   say "== gerbang sintaks"
@@ -66,12 +67,17 @@ publish() {
   run mkdir -p "$build"
   run cp "$EXTSRC/island.js" "$build/island.js"
   run cp "$EXTSRC/stylesheet.css" "$EXTDST/stylesheet.css"
+  # Kunci gsettings baru juga ikut tanpa logout: shell membaca schema dari
+  # folder terpasang saat enable, jadi file .xml dikopi lalu dikompilasi ulang.
+  run cp "$EXTSRC/schemas/org.gnome.shell.extensions.noir-island.gschema.xml" \
+    "$EXTDST/schemas/"
+  run glib-compile-schemas "$EXTDST/schemas"
   if [ "$MODE" = dry ]; then
-    say "  DRY tulis $build ke $CURRENT (CSS: $EXTDST/stylesheet.css)"
+    say "  DRY tulis $build ke $CURRENT (CSS + schema: $EXTDST)"
   else
     mkdir -p "$BUILDS"
     printf '%s' "$build" > "$CURRENT"
-    say "  publish $build (CSS: $EXTDST/stylesheet.css)"
+    say "  publish $build (CSS + schema: $EXTDST)"
   fi
 
   if [ "$MODE" = dry ]; then
