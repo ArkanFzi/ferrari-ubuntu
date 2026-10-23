@@ -395,7 +395,7 @@ state saja, dan Ubuntu memblokir dua jalur pintas: `org.gnome.Shell.Eval`
   ikut dicetak di setiap baris state (`... 452x67 @574,32 panel=32`) supaya
   sesi live bisa dihakimi dari journal saja.
 
-### Card setinggi 0 di Wayland: `ease()` geometri tidak pernah mendarat
+### Card setinggi 0: `ease()` tidak meng-commit nilainya kalau dibuat pada frame morph
 
 Kelanjutan laporan yang sama, kali ini dengan pointer yang benar-benar diarahkan
 ke island: pill melebar jadi card 460 px, `visible=true`, `opacity=255`, dan
@@ -410,13 +410,43 @@ A/B pada actor yang sama di sesi live yang sedang berjalan, tanpa menyentuh repo
 - `island.ease({opacity: 0})` → **jalan** (fade `_stow()` mendarat dan
   `onComplete`-nya fires).
 
-Jadi kerusakannya spesifik pada *properti geometri yang dianimasikan*, dan hanya
-di Wayland: di X11/Xephyr transisi geometri dapat frame, itu sebabnya rig selalu
-hijau dan bugnya lolos dari tiga putaran pengujian. Yang diubah:
+Simpulannya waktu itu *salah sebagian*, dan bagian yang salah itu yang membuat
+bug kedua lolos satu putaran lagi. Aturan yang benar, dari A/B kedua di sesi live
+yang sama (`build-PROBE`, satu notifikasi, barisnya diukur sendiri):
+
+```
+noir-AB awal                    trans=true          <- transisinya dibuat
+noir-AB t400-dengan-delay       op=0    trans=false <- selesai, nilai akhir TIDAK mendarat
+noir-AB t550-setelah-set128     op=128              <- tulis langsung selalu mendarat
+noir-AB t950-easeTANPA-delay    op=255              <- ease pada actor yang sudah tenang: jalan
+noir-AB t1450-easeDENGAN-delay  op=255              <- dengan delay pun jalan
+```
+
+Jadi penyebabnya bukan "Wayland membunuh transisi geometri" dan bukan pula
+"opacity boleh dianimasikan". Penyebabnya: **`ease()` yang dibuat pada frame yang
+sama dengan perubahan ukuran actor hilang tanpa meng-commit nilai akhirnya** —
+properti apa pun, delay atau tidak. Dan morph island *selalu* mengubah ukuran di
+frame itu, jadi setiap transisi yang lahir dari `_animateTo()`/`_fillNotif()`
+dijanjikan di mesin user. `_stow()` lolos karena dia tidak mengubah ukuran lebih
+dulu, itu sebabnya island masih bisa menghilang dan kesannya "transisi jalan".
+
+Rig hijau bukan karena X11 lebih baik: `_fadeTo()` yang rusak pun tidak akan
+terlihat, karena assertion R1/R2 hanya menghitung pixel **non-hijau** di dalam
+kotak geometri — badan card yang gelap sudah memenuhi ambang 60%/55% walau teksnya
+nol pixel. Buta pada kelas bug persis di titik ini.
+
+Yang diubah:
 
 - **`_animateTo()` menulis ukuran akhir lewat `set_size()` + `set_position()`**,
-  bukan `ease({width, height, x, y})`. Yang boleh dianimasikan hanyalah opacity,
-  dan itu memang sudah dikerjakan `_fadeTo()`.
+  bukan `ease({width, height, x, y})`.
+- **Fade dan rel rosso tidak lagi lewat `ease()` sama sekali**: `_rampTo()`
+  merakit transisinya sendiri dari `GLib.timeout_add(16 ms)` — satu-satunya jam
+  yang terbukti berdetak di sini (lihat `_tick`) — dan memanggil `set_opacity` /
+  `set_scale` mentah yang selalu mendarat. `_fadeTo()`, `_fillMedia()` (ganti trek
+  saat card terbuka) dan `_fillNotif()` (rel rosso) sekarang lewat jalur itu.
+  Yang masih `ease()`: `_stow()` (actor tenang, terbukti mendarat) dan
+  `_progressFill` (dikoreksi tick 500 ms berikutnya, jadi nilai yang meleset cuma
+  satu tick).
 - **`_unstash()` ikut mematok geometri** (`remove_all_transitions()` lalu
   `set_size`/`set_position`/`set_opacity(255)`/`visible`) supaya bangun dari
   bezel tidak lagi bergantung pada transisi yang sama.
@@ -727,6 +757,35 @@ jalan: `import Main from 'resource:///...ui/main.js'` melempar
 shell 46 (pakai `log()` global GJS), dan `gnome-extensions disable` baru menyentuh
 shell ~10 dtk sesudah dipanggil karena service `org.gnome.Shell.Extensions`
 diaktivasi lewat D-Bus — jangan menuduh race kalau timestamp terlihat aneh.
+
+### Sumbu island: rata ke seksi tanggal, bukan ke tengah monitor
+
+Island selama ini digambar pada `mon.x + (mon.width - w) / 2` — rata monitor.
+Di panel Ubuntu itu bukan rata jam: seksi tanggal duduk di `center box` yang
+lebarnya ditentukan isi kiri dan kanan panel, jadi island terbaca geser dari
+angka yang digantikannya. Terukur di screenshot user (1920 px): tengah card 960
+vs tengah teks jam 997 — **37 px di kiri**. `_anchor()` sekarang memakai
+`_clockCenter()`, dan `_pollHover()` ikut sumbu yang sama; kalau tidak, zona
+bangun tetap di tengah monitor sementara islandnya sudah pindah, dan pointer
+harus mengejar bentuk yang tidak lagi ada di sana.
+
+Dua hal yang bikin pembacaan posisi jam tidak sesederhana terlihat:
+
+- **Alokasi actor dihitung dari orang tua.** `dateMenu.container` anak dari box
+  panel, jadi `get_allocation_box().x1` adalah offset di dalam panel, bukan
+  koordinat panggung yang dipakai geometri island. Yang dibaca adalah
+  `get_transformed_position()` + lebar alokasi — pelajaran yang sama dengan
+  `_seekAt()` (lihat "posisi harus ditanya, bukan dihitung").
+- **Yang diukur sedang kita sembunyikan.** `_setClock()` mengambil alih jam
+  panel mulai level peek/card, dan actor tersembunyi tidak meninggalkan alokasi.
+  Nilainya karenanya di-cache di `_axis` dan dibaca ulang sepanjang morph;
+  cache dibuang kalau `primaryMonitor` pindah atau berganti resolusi, dan jatuh
+  kembali ke tengah monitor kalau dateMenu tidak ada.
+
+Rig membuktikan bagiannya: `sumbu=846` konstan di pill/peek/card/notif sementara
+kartu 460 px bergeser dari `@570` ke `@616`, dan R2/R2B (hover di tepi, mati di
+x=-300) tetap lolos dengan sumbu baru. Live: `card 460x72 @767,28 panel=28
+sumbu=997`, 0 JS ERROR.
 
 ## Yang sengaja tidak diubah
 

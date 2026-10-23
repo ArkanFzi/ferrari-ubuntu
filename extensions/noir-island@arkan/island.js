@@ -48,6 +48,11 @@ const COVER_PX = 44;
 
 const ANIM_MS = 260;
 const FADE_MS = 120;
+// Anak tangga ramp manual (lihat _rampTo): 16 ms ~ 60 fps, cukup halus untuk
+// fade 120 ms. Pembulatan jadi urusan penulisnya, karena scale_y float.
+const RAMP_MS = 16;
+const TULIS_OPACITY = (a, v) => a.set_opacity(Math.round(v));
+const TULIS_SCALE_Y = (a, v) => a.set_scale(1, v);
 // State baru harus bertahan sejenak sebelum diterima. Angka di bawah ambang
 // kedip mata tapi di atas flapping player yang paling umum.
 const DWELL_MS = 1200;
@@ -164,6 +169,7 @@ export class Island {
     this._dwellId = 0;
     this._geo = '';
     this._mon = null;
+    this._axis = null;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -255,6 +261,10 @@ export class Island {
     if (this._dwellId)
       GLib.source_remove(this._dwellId);
     this._dwellId = 0;
+    if (this._rampId)
+      GLib.source_remove(this._rampId);
+    this._rampId = 0;
+    this._ramps?.clear();
 
     for (const [obj, id] of this._pairs)
       obj.disconnect(id);
@@ -572,11 +582,41 @@ export class Island {
   // card di ukuran state sebelumnya: log state tetap tercetak, pixel-nya tidak.
   _monitor() {
     const mon = Main.layoutManager.primaryMonitor;
-    if (mon)
+    if (mon) {
+      // Monitor pindah/ganti resolusi = sumbu lama tidak berlaku lagi; jangan
+      // dipertahankan sampai dateMenu memberi alokasi baru.
+      if (this._mon && (this._mon.x !== mon.x || this._mon.width !== mon.width))
+        this._axis = null;
       this._mon = {x: mon.x, y: mon.y, width: mon.width};
-    else if (this._mon)
+    } else if (this._mon)
       log('noir-island: primaryMonitor kosong, morph pakai geometri terakhir');
     return this._mon;
+  }
+
+  // Sumbu tempat island harus menggantung: titik tengah seksi tanggal di panel,
+  // bukan tengah monitor. Panel Ubuntu tidak meletakkan jam di sumbu monitor —
+  // logo di kiri dan indikator di kanan menarik alokasinya — jadi rata-monitor
+  // terbaca sebagai geser (terukur ~37 px di kiri jam pada 1920 px).
+  //
+  // Nilainya di-cache karena _setClock() menyembunyikan dateMenu begitu island
+  // naik ke peek/card, dan actor tersembunyi tidak meninggalkan alokasi yang
+  // bisa dibaca; tanpa cache, morph peek -> card akan menarik island kembali ke
+  // tengah monitor di tengah layar.
+  _clockCenter() {
+    const mon = this._monitor();
+    const clock = Main.panel?.statusArea?.dateMenu?.container;
+    if (clock?.visible) {
+      // get_allocation_box().x1 memakai koordinat orang tua (box kanan panel),
+      // jadi yang terbaca di sana adalah offset di dalam panel, bukan posisi di
+      // panggung. Yang satu ruang dengan geometri island adalah transform.
+      const [ax] = clock.get_transformed_position();
+      const c = Math.round(ax + clock.get_allocation_box().get_width() / 2);
+      if (Number.isFinite(c) && c >= mon.x && c <= mon.x + mon.width) {
+        this._axis = c;
+        return c;
+      }
+    }
+    return this._axis ?? Math.round(mon.x + mon.width / 2);
   }
 
   // Sudut kiri-atas card untuk satu lebar. Island menggantung rata di tepi
@@ -584,7 +624,7 @@ export class Island {
   _anchor(w) {
     const mon = this._monitor();
     return [
-      Math.round(mon.x + (mon.width - w) / 2),
+      Math.round(this._clockCenter() - w / 2),
       Math.round(mon.y + (Main.panel.height || 0)),
     ];
   }
@@ -681,7 +721,10 @@ export class Island {
       return;
     const [x, y] = global.get_pointer();
     const bawah = mon.y + (Main.panel.height || 0);
-    const dx = Math.abs(x - (mon.x + mon.width / 2));
+    // Sumbu hover = sumbu tempat island benar-benar digambar, bukan tengah
+    // monitor: kalau dua hal ini beda, zona bangun meleset dari bentuk yang
+    // baru saja dilihat pointer.
+    const dx = Math.abs(x - this._clockCenter());
     const dekat = y >= mon.y && y <= bawah + HOVER_IN_Y && dx <= HOVER_IN_X;
     const jauh = y > bawah + HOVER_OUT_Y || dx > HOVER_OUT_X;
     if (this._hoverOn) {
@@ -840,7 +883,9 @@ export class Island {
     const [x, y] = this._anchor(w);
     // Geometri ikut dicetak di log morph: tanpa ini island yang teralokasi di
     // luar layar / opacity 0 tidak bisa dibedakan dari island yang tidak jalan.
-    this._geo = `${w}x${h} @${x},${y} panel=${Math.round(Main.panel.height || 0)}`;
+    // sumbu = titik tengah seksi tanggal yang jadi acuan x, supaya rig bisa
+    // membuktikan island rata di bawah jam dan bukan di tengah monitor.
+    this._geo = `${w}x${h} @${x},${y} panel=${Math.round(Main.panel.height || 0)} sumbu=${this._clockCenter()}`;
     this._progW = Math.max(0, w - 2 * PROG_INSET);
     this._unstash(w, h, x, y);
     // Ukuran akhir ditulis lewat set_size, BUKAN ease({height}). Terbukti live di
@@ -867,14 +912,50 @@ export class Island {
     for (const row of rows) {
       if (!row)
         continue;
-      row.set_opacity(0);
-      row.ease({
-        opacity: 255,
-        delay: Math.round(ANIM_MS * 0.35),
-        duration: FADE_MS,
-        mode: Clutter.AnimationMode.EASE_OUT,
-      });
+      this._rampTo(row, TULIS_OPACITY, 255,
+        {dari: 0, tunda: Math.round(ANIM_MS * 0.35), dur: FADE_MS});
     }
+  }
+
+  // Clutter.ease() tidak boleh dipakai untuk apa pun yang nilainya harus
+  // mendarat. Terbukti live di sesi Wayland mesin ini: transisi yang dibuat pada
+  // frame yang sama dengan perubahan ukuran actor hilang tanpa meninggalkan
+  // nilai akhirnya — opacity baris tetap 0 pada t=400 ms sementara transisinya
+  // sudah tidak ada, padahal ease yang sama pada actor yang sudah tenang naik ke
+  // 255 (A/B: noir-AB t400 op=0 trans=false → t950 easeTANPA-delay op=255).
+  // Morph island SELALU mengubah ukuran di frame itu, jadi isinya tidak pernah
+  // tergambar di mesin user. Rig X11 lolos karena di sana transisinya jalan, dan
+  // assertion-nya cuma menghitung pixel non-hijau: badan card sudah cukup
+  // memenuhi ambang walau teksnya nol pixel.
+  //
+  // Yang terbukti tetap berdetak di sini hanya GLib main loop (lihat _tick), dan
+  // set_opacity/set_size langsung tergambar. Jadi transisi dirakit sendiri: satu
+  // timer untuk semua ramp, berhenti saat tidak ada yang tersisa.
+  _rampTo(actor, tulis, target, {dari = 0, tunda = 0, dur = FADE_MS} = {}) {
+    this._ramps ??= new Map();
+    this._ramps.set(actor, {
+      tulis, awal: dari, target, dur, mulai: monoMs() + tunda,
+    });
+    tulis(actor, dari);
+    if (!this._rampId)
+      this._rampId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, RAMP_MS,
+        () => this._stepRamps());
+  }
+
+  _stepRamps() {
+    const kini = monoMs();
+    for (const [actor, r] of this._ramps) {
+      const p = Math.min(1, Math.max(0, kini - r.mulai) / r.dur);
+      // EASE_OUT yang mendekati bentuk lama: cepat di muka, melambat di ujung.
+      const l = 1 - (1 - p) * (1 - p);
+      r.tulis(actor, r.awal + (r.target - r.awal) * l);
+      if (p >= 1)
+        this._ramps.delete(actor);
+    }
+    if (this._ramps.size)
+      return GLib.SOURCE_CONTINUE;
+    this._rampId = 0;
+    return GLib.SOURCE_REMOVE;
   }
 
   // ------------------------------------------------------------------ render
@@ -1151,7 +1232,7 @@ export class Island {
     this._loadCover(m.art, m.key);
     this._updateProgress(player);
     if (ganti)
-      this._mediaRow.ease({opacity: 255, duration: FADE_MS, mode: Clutter.AnimationMode.EASE_OUT});
+      this._rampTo(this._mediaRow, TULIS_OPACITY, 255, {dari: 0});
   }
 
   // Waktu tidak pernah dikorbankan. "0:12 / 3:30" adalah alasan orang membuka
@@ -1213,12 +1294,7 @@ export class Island {
     if (this._shownNotif !== n) {
       this._shownNotif = n;
       this._rail.set_pivot_point(0.5, 0);
-      this._rail.set_scale(1, 0);
-      this._rail.ease({
-        scale_y: 1,
-        duration: RAIL_MS,
-        mode: Clutter.AnimationMode.EASE_OUT_QUINT,
-      });
+      this._rampTo(this._rail, TULIS_SCALE_Y, 1, {dari: 0, dur: RAIL_MS});
     }
   }
 

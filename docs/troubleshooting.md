@@ -277,26 +277,49 @@ dikopi + dikompilasi ke folder terpasang, disable/enable, dan shell yang sama
 langsung membaca kunci baru itu (island tidur 6 dtk setelah dibiarkan).
 Kalau setelah reload island terlihat aneh, `--rollback` lebih dulu, baru logout.
 
-## 17. Island "muncul" tapi nol pixel: `ease()` geometri mati di Wayland
+## 17. Island "muncul" tapi kosong: `ease()` tidak meng-commit nilai akhirnya
 
-Keluhan: pointer sudah diarahkan ke daerah notch, pill melebar jadi card,
-`visible=true`, `opacity=255` — dan tidak ada yang tergambar sama sekali. Di rig
-Xephyr gejala ini **tidak pernah muncul**, jadi tiga putaran pengujian pertama
-membacanya hijau.
+Dua wajah dari satu penyakit. Wajah pertama: pill melebar jadi card,
+`visible=true`, `opacity=255`, dan tidak ada yang tergambar sama sekali —
+geometrinya macet di 0. Wajah kedua, muncul setelah yang pertama ditambal:
+**badan card tergambar benar 460x72 tapi isinya nol pixel** — teks lagu/notifikasi
+hilang, hanya kotak hitam bersisi rosso yang tersisa. Yang kedua ini yang
+dilaporkan user sebagai "keterangan lagunya hilang".
 
-A/B pada actor yang sama di sesi Wayland yang sedang berjalan:
+Diagnosis pertama sempat salah, dan bagian yang salah itu yang membuat wajah
+kedua lolos. Aturan yang benar, dari A/B di sesi hidup (`build-PROBE`, satu
+`notify-send`, barisnya melapor sendiri):
 
 ```
-island.ease({height: 72, ...})  -> get_preferred_height() 0..0 sampai +1500 ms
-island.set_size(460, 72)        -> alloc=460x72 seketika
-island.ease({opacity: 0})       -> mendarat, onComplete fires
+t400-dengan-delay     op=0    trans=false  <- transisi selesai, nilai akhir TIDAK mendarat
+t550-setelah-set128   op=128               <- tulis langsung selalu mendarat
+t950-easeTANPA-delay  op=255               <- ease pada actor tenang: jalan
+t1450-easeDENGAN-delay op=255              <- dengan delay pun jalan
 ```
 
-Jadi yang busuk adalah transisi properti **geometri**, bukan animasi pada umum-
-nya. Aturan mainnya sekarang: geometri selalu `set_size()`/`set_position()`,
-yang boleh dianimasikan hanya opacity (`_fadeTo()`). Kalau nanti ada yang
-mengembalikan `ease({width, height, x, y})` karena "di rig jalan", itu bukan
-bukti — rig-nya X11.
+Aturannya bukan "geometri tidak bisa dianimasikan" dan bukan "khusus Wayland":
+**transisi yang dibuat pada frame yang sama dengan perubahan ukuran actor tidak
+pernah meng-commit nilai akhirnya**, properti apa pun. `_animateTo()` selalu
+mengubah ukuran di frame itu, jadi setiap `ease()` yang lahir dari sana — fade
+isi, rel rosso — dijanjikan di mesin user. `_stow()` tampak sehat karena dia
+tidak mengubah ukuran lebih dulu; itu sebabnya island masih bisa menghilang dan
+kesannya animasi bekerja.
+
+Rig Xephyr tidak menangkap keduanya, dan bukan karena X11: assertion R1/R2 hanya
+menghitung pixel **non-hijau** di dalam kotak geometri, sementara badan card yang
+gelap saja sudah melampaui ambang 60%. Yang dibutuhkan assertion adalah pixel
+*terang* (teks), bukan sekadar coverage.
+
+Aturan mainnya sekarang: geometri lewat `set_size()`/`set_position()`, dan fade
+lewat `_rampTo()` — transisi dirakit dari `GLib.timeout_add(16 ms)` yang memanggil
+`set_opacity`/`set_scale` mentah. Kalau ada yang mengembalikan `ease({...})` di
+jalur morph karena "di rig jalan", itu bukan bukti.
+
+Perintah pertama untuk memastikan: build pelapor sementara (repo utuh + satu
+baris `log()` di `_animateTo`, diterbitkan ke **path baru** — GJS menyimpan modul
+per URI, menimpa berkas di path yang sama tidak pernah dibaca ulang), lalu
+`journalctl /usr/bin/gnome-shell -b | grep noir-CEK`. `op=255 rail=1` berarti isi
+benar-benar naik ke layar.
 
 Tiga hal lain yang muncul dari laporan yang sama, semuanya tertangkap rig:
 
@@ -323,3 +346,37 @@ Tiga hal lain yang muncul dari laporan yang sama, semuanya tertangkap rig:
 Kalau island hilang setelah perubahan UI, perintah pertama yang harus jalan
 adalah `journalctl /usr/bin/gnome-shell -b | grep noir-island` — error pemuatan
 ada di sana, bukan di `gnome-extensions info`.
+
+## 18. Logo Ferrari, chip PIT, dan tema shell hilang serentak — tanpa status ERROR
+
+Gejalanya bukan satu extension mati tapi **semua sekaligus**: logo/cluster di panel
+kiri hilang, chip PIT hilang, dan seluruh popup kembali bergaya Yaru polos (kartu
+notifikasi saling menempel, tidak ada jarak). `gnome-extensions info` tidak
+menunjukkan ERROR; `list --enabled` hanya menyisakan `noir-island@arkan`.
+
+Yang terjadi: `enabled-extensions` di sesi ini adalah **whitelist** (TIER 26), jadi
+satu tulisan yang menggantinya dengan daftar pendek langsung mematikan semuanya —
+tanpa jejak error. Ini sudah dua kali terjadi di mesin ini, keduanya dari alat uji:
+`dconf write /org/gnome/shell/enabled-extensions "['noir-island@arkan']"` milik
+seed rig pernah dieksekusi pada session bus yang sedang jalan, bukan di bus
+terisolasi. Nilai itu bertahan di `~/.config/dconf/user` dan baru terlihat
+menelan seluruh tema **pada shell restart berikutnya**, jauh setelah pelakunya
+lupa — itu sebabnya gejalanya terasa datang sendiri.
+
+```bash
+gsettings get org.gnome.shell enabled-extensions      # harus 10 uuid, bukan 1
+grep '^/org/gnome/shell/enabled-extensions ' settings/noir.dconf | cut -d' ' -f2- \
+  | { read v; dconf write /org/gnome/shell/enabled-extensions "$v"; }
+```
+
+Tulis dari berkas desain, jangan dari ingatan: `settings/noir.dconf` adalah sumber
+kebenarannya, dan shell membaca kunci ini secara hidup — semua extension naik lagi
+tanpa logout (`journalctl ... | grep noir` menampilkan `noir-cluster:`/`noir-telemetry:`
+kembali). Cek ketahanannya lewat bus privat, karena dconf-service menyimpan
+tulisannya di memori: `HOME=$HOME dbus-run-session -- dconf dump /org/gnome/shell/`.
+Kalau nilai di sana masih daftar pendek, tulisannya belum menetes ke berkas dan
+akan hilang lagi saat sesi mati kasar.
+
+Satu-satunya extension yang tidak ikut daftar itu adalah milik Ubuntu
+(`ubuntu-dock`, `ubuntu-appindicators`, `tiling-assistant`) — shell memaksa
+daftarnya sendiri digabung, jadi menulis ulang kunci di atas tidak menghapus dock.
