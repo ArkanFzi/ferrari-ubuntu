@@ -207,9 +207,36 @@ Dua keputusan bentuk:
   dipasang, jadi island direbut-klik dengan `removeChrome` →
   `addChrome({affectsInputRegion})` saat melebar, bukan dengan mengubah
   properti.
-- **v1 tanpa gschema.** Skema baru baru terdaftar setelah logout/login, jadi
-  semua ambang (hold 8 s / 20 s, antrean 8, durasi 240 ms) masih konstanta di
-  puncak file. Yang bisa diubah pengguna masuk belakangan.
+- **Ambang yang bisa dipakai tanpa logout masuk gschema.** Yang dulu konstanta
+  di puncak file dan benar-benar sering diputar sekarang tujuh kunci di
+  `schemas/org.gnome.shell.extensions.noir-island.gschema.xml`
+  (`persistent-pill`, `show-when-paused`, `hold-normal-ms` 15 s, `hold-high-ms`
+  20 s, `hold-critical-ms` 45 s, `hold-hover-extra-ms` 30 s, `peek-ms` 3 s),
+  dibaca lewat `getSettings()` dan di-cache di `this._opt` oleh `_syncOpts()`
+  yang dipanggil ulang tiap `changed::` — jadi nilainya berubah pada shell yang
+  sedang jalan, terbukti dari rig (`D-MATIKAN-PILL`, `D-PAUSED-MATIBERPERILAKU`).
+  Yang tinggal konstanta adalah yang tidak pernah perlu ditebak-tebak: geometri
+  (`PILL_W`/`MEDIA_W`/`NOTIF_H`, …), `ANIM_MS`/`FADE_MS`/`DWELL_MS`, poll
+  (`TICK_MS`, `SCAN_TICKS`, `HOVER_*`), `QUEUE_MAX`, dan `BLIND_RETRY_MAX`.
+  Catatan yang tetap berlaku: **menambah kunci baru** ke schema yang sudah terpasang
+  butuh logout/login sebelum `gsettings` bisa melihatnya; mengubah **nilai** kunci
+  yang sudah ada tidak. Dari terminal, schema extension ini lokal, jadi pakai
+  `GSETTINGS_SCHEMA_DIR=~/.local/share/gnome-shell/extensions/noir-island@arkan/schemas`
+  (pola yang sama dengan noir-cluster di Troubleshooting §6).
+- **Island dipecah jadi stub + isi supaya UI bisa diganti tanpa logout.**
+  Awalnya "perlu logout" dianggap harga yang dibayar untuk GJS; ternyata harga
+  itu cuma berlaku untuk *satu path yang di-cache selamanya*. Shell 46 menutup
+  `ReloadExtension` (`ui/shellDBus.js:468`), tetapi memuat modul dari **path
+  lain** terbukti mengeksekusi ulang (query-string `?v=2` tidak — cache tetap
+  mengembalikan modul lama). Jadi `extension.js` yang terpasang kini hanya
+  pemuat: dia membaca `~/.local/share/noir-island/CURRENT`, meng-import
+  `<build>/island.js`, dan meneruskan dirinya sebagai konteks (`getSettings()`
+  tetap di-resolve dari folder terpasang, karena `this.dir` milik stub). TanpaCURRENT, fallback-nya `island.js` di folder terpasang — pilihan yang diambil
+  supaya `install.sh` biasa tidak pernah menghasilkan island yang mati.
+  Konsekuensi yang diterima: tiap build yang dimuat dalam satu sesi tertinggal
+  di registri modul shell (memori naik sedikit, hilang saat logout), dan
+  disable/enable cepat bisa menumpuk dua promise — dilindungi token urutan di
+  stub sehingga hanya permintaan terakhir yang boleh membangun island.
 
 ### Revisi: island menggantung, bukan mengambang
 
@@ -253,11 +280,28 @@ aplikasi apa pun.
 Notch yang selalu terpasang ternyata sama saja dengan ornamen: ia menempel
 tanpa mengatakan apa pun. Sekarang island mulai dari keadaan **tersimpan**
 (`_stowed`, actor `visible=false` sejak `enable()`) dan hanya keluar kalau ada
-isisnya. Aturan isinya satu baris: trek yang **sedang berbunyi** (`Playing`) atau
-notifikasi yang sedang tampil / masih mengantre. Trek paused bukan isi — ia
-hanya menunda tidur selama grace, lalu island mundur (revisi 22/10: aturan
-lama "paused pun ikut" membuat island menempel berjam-jam di laptop yang
-lagunya berhenti, dan itu persis ornamen yang barusan dikritik).
+isisnya. Aturan isinya sekarang dua knob gsettings, bukan satu baris kode: trek
+yang **sedang berbunyi** (`Playing`) selalu isi, trek **paused** boleh jadi isi
+kalau `show-when-paused` aktif, dan pill media tidak lagi butuh hover selama
+`persistent-pill` aktif. Notifikasi yang tampil / masih mengantre tetap isi.
+(revisi 23/10 membalas revisi 22/10: aturan "paused pun ikut" lalu "paused bukan
+isi" sama-sama kalah karena keduanya ditulis di kode. Yang benar adalah *pill
+paused boleh menempel* — justru di saat jeda orang mencari tombol play — tapi
+keputusannya pindah ke `persistent-pill` / `show-when-paused` plus tiga
+`hold-*-ms` dan `peek-ms`, sehingga bisa diubah hidup lewat `gsettings set`
+tanpa logout. Ketemu di rig: `D-MATIKAN-PILL` dan `D-PAUSED-MATIBERPERILAKU`
+mengubah perilaku pada shell yang sedang jalan.)
+
+- **Pemain yang lahir buta pernah dikira bug "island hilang sebentar".**
+  `_players` menyimpan nama begitu player terlihat di bus, jadi kalau `GetAll`
+  pertama tidak menghasilkan metadata tidak ada yang bertanya lagi — island duduk
+  `idle` selamanya meski treknya ada. `_scan()` kini mengulang pembacaan untuk
+  entri tanpa metadata, dibatasi `BLIND_RETRY_MAX` (10 × 2 dtk) supaya nama yang
+  memang bukan player tidak ditanya seumur hidup. Catatan jujur: kegagalan
+  berantai di run 2–5 rig ternyata bukan ini, melainkan dconf terisolasi yang
+  dipakai ulang antar-run — nilai `show-when-paused=false` dari uji D di run
+  sebelumnya masih terbaca saat run berikutnya boot. Retri-nya tetap ditinggalkan
+  karena lubangnya nyata.
 
 - **Grace 4 dtk sebelum mundur.** Trek terakhir habis, trek berikutnya menyusul
   1 dtk kemudian: tanpa jeda itu island kedip masuk-keluar di setiap pergantian
@@ -311,8 +355,9 @@ state saja, dan Ubuntu memblokir dua jalur pintas: `org.gnome.Shell.Eval`
   satu kartu mem-*pin* state `notif` selamanya: media dan notif berikutnya tidak
   pernah tampil lagi, dan karena statenya tidak berubah, **tidak ada satu baris
   log pun** — island yang hidup tapi diam terlihat persis seperti island yang
-  hilang. Critical sekarang dibatasi `HOLD_CRITICAL_MS` 45 dtk; terverifikasi di
-  rig (lepas setelah 45,3 dtk, media kembali tampil).
+  hilang. Critical sekarang dibatasi `hold-critical-ms` 45 dtk (dulu konstanta
+  `HOLD_CRITICAL_MS`, kini kunci gsettings — lihat bagian Menyendiri);
+  terverifikasi di rig (lepas setelah 45,3 dtk, media kembali tampil).
 - **Antrean yang tersangkut membuat island tidak pernah tidur.** `_surface()`
   berhenti kalau DND aktif; item yang sudah terlanjur mengantre tetap dihitung
   `_hasContent()` sehingga jam mundur `stow` tidak pernah mulai. Sekarang
@@ -382,7 +427,9 @@ morph benar-benar jalan. Yang dilakukan sekarang:
   kembali ke `base`.
 - **Jendela gejalanya menyempit.** Dengan paused yang tidak lagi dihitung isi,
   card yang tertinggal di ukuran media paling lama terlihat 4 dtk (grace)
-  sebelum island mundur total.
+  sebelum island mundur total. (revisi 23/10: clause pertamanya sudah tidak
+  berlaku — `show-when-paused` default true, jadi jendela ini lagi-lagi cuma
+  berlaku untuk trek yang benar-benar `Stopped`.)
 - **Jujur: penyebab `primaryMonitor` kosong di sesi live belum tertangkap.**
   Shell live tidak bisa di-inject (Eval dan Screenshot diblokir), jadi bukti
   terakhirnya baru bisa datang dari journal setelah reload — baris state sekarang

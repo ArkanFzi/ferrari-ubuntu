@@ -230,3 +230,46 @@ target — dan kalau kamu melihat rpm naik sementara ekstensi tidak menulis apa
 pun, itu memang jalur yang benar. Kalau mau tulis rpm langsung, dibutuhkan
 root helper + `pwm1_enable=1`; sengaja tidak dibuat (lihat TIER 26 di
 `design-notes.md`).
+
+## 16. Mengubah UI island tanpa logout
+
+Dulu setiap sentuhan di `extension.js` baru terbaca setelah logout/login. Dua
+penyebab, keduanya terbukti di mesin ini:
+
+- `org.gnome.Shell.Extensions.ReloadExtension` di shell 46 sengaja dimatikan —
+  dia menjawab `NOT_SUPPORTED: ReloadExtension is deprecated and does not work`
+  (`ui/shellDBus.js:468`).
+- GJS 1.80 menyimpan modul ES per URI. Menulis ulang berkas di path yang sama
+  tidak pernah dibaca lagi, dan menambah query-string (`…js?v=2`) **tidak**
+  melepas cache — yang terbukti melepas hanya **path yang berbeda**.
+
+Jalurnya sekarang: `extension.js` yang terpasang hanyalah stub ±60 baris yang
+memuat `island.js` dari path di `~/.local/share/noir-island/CURRENT`. Kalau
+penunjuk itu tidak ada (setelah `install.sh` biasa), stub memuat `island.js`
+dari folder terpasang — jadi tidak ada kondisi "island mati karena belum di-publish".
+
+```bash
+scripts/hot-island.sh             # publish build dari repo + reload (tanpa logout)
+scripts/hot-island.sh --status    # build aktif + riwayat
+scripts/hot-island.sh --rollback  # kembali ke build sebelumnya
+scripts/hot-island.sh --dry-run   # cetak rencana
+```
+
+Script itu menolak publish kalau `node --check` gagal, menyalin
+`stylesheet.css` ke folder terpasang (CSS dibaca shell dari
+`extension.dir` setiap enable — `extensionSystem.js:126-143`), lalu
+`gnome-extensions disable` + `enable`. Build lama dipangkas, 8 terakhir disimpan.
+
+Bukti di rig Xephyr (shell yang sama, tanpa restart):
+
+```
+sebelum swap: media <- RigTest pill 240x34 @680,32
+sesudah swap: media <- RigTest pill 300x34 @650,32
+B-SHELL-TIDAK-RESTART: OK (pid 880462 masih hidup)
+C-NOTIF-MASIH-HIDUP:  OK (notif <- notify-send card 460x72 @570,32)
+```
+
+Yang **tetap** butuh logout: menambah kunci gsettings baru ke schema yang sudah
+terpasang, dan perubahan pada stub `extension.js` itu sendiri (dia satu-satunya
+berkas yang di-cache selamanya oleh shell). Kalau setelah reload island terlihat
+aneh, `--rollback` lebih dulu, baru logout.

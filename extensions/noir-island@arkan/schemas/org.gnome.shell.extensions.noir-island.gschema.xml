@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.noir-island"
+          path="/org/gnome/shell/extensions/noir-island/">
+
+    <key name="persistent-pill" type="b">
+      <default>true</default>
+      <summary>Pill island selalu terlihat</summary>
+      <description>Selama ada trek (termasuk yang dijeda) atau notifikasi yang
+        mengantre, pill tetap duduk di bawah panel sehingga tombol transport bisa
+        diklik kapan pun. Mati = pill hanya muncul saat pointer di band hover.</description>
+    </key>
+
+    <key name="show-when-paused" type="b">
+      <default>true</default>
+      <summary>Trek jeda boleh tampil</summary>
+      <description>Izinkan status Paused sebagai isi media. Mati = island hanya
+        bangun saat ada yang benar-benar diputar.</description>
+    </key>
+
+    <key name="hold-normal-ms" type="i">
+      <range min="1000" max="120000"/>
+      <default>15000</default>
+      <summary>Masa tampil notifikasi urgensi normal</summary>
+      <description>Lamanya kartu notifikasi urgensi rendah/normal boleh tampil
+        sebelum kembali ke state sebelumnya.</description>
+    </key>
+
+    <key name="hold-high-ms" type="i">
+      <range min="1000" max="300000"/>
+      <default>20000</default>
+      <summary>Masa tampil notifikasi urgensi tinggi</summary>
+      <description>Lamanya kartu notifikasi urgensi tinggi boleh tampil.</description>
+    </key>
+
+    <key name="hold-critical-ms" type="i">
+      <range min="1000" max="600000"/>
+      <default>45000</default>
+      <summary>Masa tampil notifikasi urgensi kritis</summary>
+      <description>Batas nyata untuk notifikasi yang menurut freedesktop tidak
+        kedaluwarsa, supaya island tidak jadi sandera satu kartu.</description>
+    </key>
+
+    <key name="hold-hover-extra-ms" type="i">
+      <range min="0" max="300000"/>
+      <default>30000</default>
+      <summary>Bonus masa tampil selama pointer di atas kartu</summary>
+      <description>Tambahan waktu di atas hold saat pointer berdiri di atas
+        island; kartu dianggap masih dibaca. Nol = pointer tidak menahan apa pun.</description>
+    </key>
+
+    <key name="peek-ms" type="i">
+      <range min="0" max="30000"/>
+      <default>3000</default>
+      <summary>Lamanya pengumuman peek</summary>
+      <description>Selama ini island melebar penuh setelah isi baru tiba, lalu
+        mundur sendiri ke pill.</description>
+    </key>
+  </schema>
+</schemalist>
