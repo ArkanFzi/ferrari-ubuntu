@@ -82,6 +82,17 @@
   color: #da291c;
 }
 
+/* Jam di pill. Slot yang sama dipakai kicker kartu (9 px/0.40) tapi isinya
+   berbeda: mulai peek/card angka ini menggantikan jam panel, jadi bobotnya
+   harus setara, tidak boleh setipis label sekunder. */
+.noir-island-pilltime {
+  font-family: Titillium Web;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: rgba(242, 242, 242, 0.92);
+}
+
 /* Hierarki datang dari ukuran dan bobot (TIER 1-4), bukan dari warna. */
 .noir-island-title {
   font-size: 13px;

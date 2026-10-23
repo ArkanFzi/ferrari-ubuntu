@@ -211,8 +211,10 @@ export default class NoirIslandExtension extends Extension {
     // lagi sampai logout.
     this._dead = true;
     // Statement berikutnya, sebelum apa pun yang bisa melempar: satu-satunya
-    // jaminan jam panel kembali kalau island sedang memakannya.
+    // jaminan jam panel kembali kalau island sedang memakannya. _setActive tidak
+    // lagi menyentuh jam (level yang memutuskannya), jadi dia diminta eksplisit.
     this._setActive(false);
+    this._setClock(true);
     // Sama untuk banner: jangan pernah meninggalkan shell dalam keadaan diblok.
     this._blockBanner(false);
     this._armOutside(false);
@@ -298,7 +300,11 @@ export default class NoirIslandExtension extends Extension {
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._pillKicker = new St.Label({
-      style_class: 'noir-island-kicker',
+      // Bukan .noir-island-kicker: yang itu label sekunder 9 px/0.40 milik kicker
+      // kartu. Di pill slot ini diisi jam, yang mulai peek/card menggantikan jam
+      // panel ~15 px putih penuh — dipakai gaya sekunder membuat tengah panel
+      // terbaca kosong.
+      style_class: 'noir-island-pilltime',
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._noEllipsis(this._pillKicker);
@@ -537,9 +543,8 @@ export default class NoirIslandExtension extends Extension {
   }
 
   // Satu sakelar untuk seluruh konsekuensi "island sedang tampil": siapa yang
-  // boleh merebut klik, apakah key line rosso menyala, dan apakah jam panel boleh
-  // ada. Ketiganya harus naik-turun bersamaan, atau island bisa terlihat tapi
-  // tidak bisa diklik — atau makan jam panel selamanya.
+  // boleh merebut klik dan apakah key line rosso menyala. Jam panel BUKAN bagian
+  // dari keputusan ini — dia baru dimakan mulai level peek/card, lihat _setClock.
   _setActive(on) {
     if (this._active === on || !this._island)
       return;
@@ -554,12 +559,17 @@ export default class NoirIslandExtension extends Extension {
       this._island.add_style_class_name('noir-island--live');
     else
       this._island.remove_style_class_name('noir-island--live');
-    this._setClock(!on);
   }
 
   // Jam panel hanya boleh dikembalikan kalau KITA yang menyembunyikannya: Just
   // Perfection menulis actor yang sama, dan show() buta akan memaksa tampil jam
   // yang memang dimatikan user di sana.
+  //
+  // Yang menyembunyikannya adalah LEVEL, bukan sekadar "island sedang tampil".
+  // Pill tingginya 34 px dan menggantung di bawah panel, jadi dia tidak pernah
+  // bisa membaca sebagai pengganti jam; melepaskan jam panel demi pill terbukti
+  // menyisakan tengah panel yang kosong. Jam baru dimakan begitu island naik ke
+  // peek/card dan isinya memang setingkat jam panel.
   _setClock(show) {
     const clock = Main.panel?.statusArea?.dateMenu?.container;
     if (!clock)
@@ -697,6 +707,7 @@ export default class NoirIslandExtension extends Extension {
     this._sig = null;
     this._armOutside(false);
     this._setActive(false);
+    this._setClock(true);
     for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._progress])
       row.visible = false;
     const [x, y] = this._anchor(this._island.width);
@@ -756,6 +767,7 @@ export default class NoirIslandExtension extends Extension {
     this._progress.set_size(this._progW, PROGRESS_H);
     this._fadeTo(level, content);
     this._setActive(true);
+    this._setClock(level === 'pill');
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
@@ -985,8 +997,10 @@ export default class NoirIslandExtension extends Extension {
   }
 
   _fillPill(player, content, jam) {
-    // Pill selalu membawa jam di slot kicker: dialah yang menggantikan jam panel,
-    // jadi island tidak boleh memakan jam lalu menggantinya dengan judul lagu.
+    // Pill selalu membawa jam di slot kicker. Di level pill jam panel masih duduk
+    // di tempatnya dan angka ini cuma pengiring; di peek/card dialah pengganti
+    // jam panel, jadi island tidak boleh memakan jam lalu menggantinya dengan
+    // judul lagu.
     this._pillKicker.set_text(jam);
     this._pillText.set_text(content === 'media' ? player.meta.title
       : GLib.DateTime.new_now_local().format('%a %d %b'));

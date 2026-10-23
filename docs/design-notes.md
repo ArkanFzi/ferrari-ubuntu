@@ -463,11 +463,20 @@ klik tengah-atas permanen dan memakan jam panel selamanya (risiko #2 di rencana)
 Yang tetap seperti rencana: notifikasi selalu membuka card, dan jam panel kembali
 saat island tidur.
 
-**Jam panel.** `_setActive()` menggantikan `_setInput()` + toggle `--live`:
-input region, reaktivitas, opacity, dan `dateMenu.container.hide()/.show()` di
-satu tempat. `_setClock(show)` dijaga `_clockHiddenByUs` supaya island tidak
+**Jam panel dimakan oleh LEVEL, bukan oleh "island sedang tampil".** `_setActive()`
+menggantikan `_setInput()` + toggle `--live`: input region, reaktivitas, dan opacity
+di satu tempat. `_setClock(show)` dijaga `_clockHiddenByUs` supaya island tidak
 pernah memaksa tampil jam yang memang dimatikan Just Perfection, dan
-`_setActive(false)` adalah statement pertama `disable()`.
+`_setActive(false)` + `_setClock(true)` adalah statement awal `disable()`.
+
+Versi pertama mengikat jam ke `_setActive` — begitu island bangun sebagai pill, jam
+panel hilang. Di sesi live itu terbukti salah: pill menggantung di `y=26` (di
+bawah panel) dan jamnya ditulis dengan gaya label sekunder 9 px/0.40, sementara
+yang dia hapus adalah jam panel 142×26 px putih penuh — tengah panel terbaca
+kosong, persis keluhan user. Sekarang jam hanya dimakan mulai `peek`/`card`
+(`_animateTo` → `_setClock(level === 'pill')`), dan slot jam pill punya gayanya
+sendiri `.noir-island-pilltime` 15 px/600/0.92 — setara jam panel, karena di
+peek/card dialah penggantinya.
 
 **Yang mengalah pada teks panjang adalah baris sekunder, bukan jam.** Versi
 pertama `_fitText()` mengorbankan label waktu begitu judul tidak muat; di rig
