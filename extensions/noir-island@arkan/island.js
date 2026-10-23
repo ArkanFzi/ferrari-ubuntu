@@ -70,12 +70,15 @@ const OPT = {
 // persis di atas video fullscreen) dan bukan track-input (Wayland). 8 query per
 // detik saat island tertidur adalah harga tombol yang bisa diklik.
 const HOVER_POLL_MS = 120;
-// Dead band 20 px antara masuk dan keluar: tanpa itu pill yang persis seukuran
+// Dead band antara masuk dan keluar: tanpa itu pill yang persis seukuran
 // region masuk akan nyala-mati tiap frame saat pointer berdiri di ambangnya.
-const HOVER_IN_Y = 44;
-const HOVER_OUT_Y = 64;
-const HOVER_IN_X = 120;
-const HOVER_OUT_X = 160;
+// Zona masuk harus menutupi card TERLEBAR (NOTIF_W 460 -> setengahnya 230) dan
+// card tertinggi (72 px di bawah panel): yang dicari pointer adalah bentuk yang
+// baru saja dilihatnya, bukan pill yang tersisa di dalam panel.
+const HOVER_IN_Y = 100;
+const HOVER_OUT_Y = 124;
+const HOVER_IN_X = 250;
+const HOVER_OUT_X = 300;
 // Dua poll (240 ms) untuk bangun, tiga (360 ms) untuk tidur: masuk harus terasa
 // instan, keluar harus yakin.
 const HOVER_IN_POLLS = 2;
@@ -413,7 +416,22 @@ export class Island {
     ctl.add_child(this._btnNext);
 
     this._mediaRow.add_child(this._cover);
-    this._mediaRow.add_child(col);
+    // Kolom teks dibungkus St.Button: klik di judul/artis/album adalah jalan
+    // pulang dari card, simetris dengan klik pill yang membukanya. Bukan tombol
+    // ✕ baru, dan bukan outside-click: _armOutside bergantung pada captured-event
+    // stage yang di Wayland tidak terkirim, jadi satu-satunya affordance yang
+    // terbukti bekerja adalah klik pada isi card itu sendiri. Kelasnya pakai
+    // milik pill supaya tidak ada chrome tambahan sama sekali.
+    this._mediaCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._mediaCollapse.set_child(col);
+    this._mediaCollapse.connect('clicked', () => this._collapse());
+    this._mediaRow.add_child(this._mediaCollapse);
     this._mediaRow.add_child(ctl);
     island.add_child(this._mediaRow);
 
@@ -796,7 +814,7 @@ export class Island {
     log('noir-island: stow');
   }
 
-  _unstash(w, x, y) {
+  _unstash(w, h, x, y) {
     if (!this._stowed)
       return;
     this._stowed = false;
@@ -808,7 +826,7 @@ export class Island {
     island.remove_all_transitions();
     island.visible = true;
     island.set_opacity(255);
-    island.set_size(w, 0);
+    island.set_size(w, h);
     island.set_position(x, y);
     log('noir-island: unhide');
   }
@@ -824,15 +842,16 @@ export class Island {
     // luar layar / opacity 0 tidak bisa dibedakan dari island yang tidak jalan.
     this._geo = `${w}x${h} @${x},${y} panel=${Math.round(Main.panel.height || 0)}`;
     this._progW = Math.max(0, w - 2 * PROG_INSET);
-    this._unstash(w, x, y);
-    this._island.ease({
-      width: w,
-      height: h,
-      x,
-      y,
-      duration: ANIM_MS,
-      mode: Clutter.AnimationMode.EASE_OUT_QUINT,
-    });
+    this._unstash(w, h, x, y);
+    // Ukuran akhir ditulis lewat set_size, BUKAN ease({height}). Terbukti live di
+    // sesi Wayland: transisi properti tinggi tidak pernah mendarat — prefH actor
+    // tetap 0..0 sampai +1500 ms sesudah morph, island naik selebar card tapi
+    // setinggi 0 px, visible dan opacity 255 namun nol pixel — sementara
+    // set_size(460, 72) pada actor yang sama langsung teralokasi 460x72. Di X11
+    // transisinya jalan, itu sebabnya rig selalu hijau dan bugnya lolos.
+    // Yang boleh dianimasikan adalah opacity, dan itu dikerjakan _fadeTo.
+    this._island.set_size(w, h);
+    this._island.set_position(x, y);
     this._progress.set_size(this._progW, PROGRESS_H);
     this._fadeTo(level, content);
     this._setActive(true);
@@ -876,6 +895,9 @@ export class Island {
     if (!this._cardOpen)
       return;
     this._cardOpen = false;
+    // Menyusut karena klik adalah aksi user: jam idle mulai ulang supaya pill
+    // tidak ikut lenyap di tangan yang baru saja menutup card-nya.
+    this._wake();
     this._render();
   }
 
@@ -1792,7 +1814,13 @@ export class Island {
     // media ikut tidur. Yang membangunkannya hanya pointer yang datang dekat
     // panel (lihat _pollHover), notifikasi baru (lihat _onNotify), dan isi baru
     // (lihat _render); yang tidak membangunkan adalah waktu yang berlalu.
-    if (this._wakeUntil && monoMs() >= this._wakeUntil) {
+    // Pointer yang BERDIRI di atas island dikecualikan: _awake() sudah
+    // memperlakukan hoverOn sebagai bangun, jadi jam yang menjatuhkan card di
+    // tengah tangan adalah kontradiksi — dan itu membuat jalan pulang lewat klik
+    // (kolom teks card media) tidak pernah sempat dipanggil. Rig menangkapnya
+    // sebagai card yang menyusut sendiri 6 dtk sesudah dibuka tanpa pointer
+    // bergerak sama sekali.
+    if (this._wakeUntil && monoMs() >= this._wakeUntil && !this._hoverOn) {
       this._wakeUntil = 0;
       this._peekUntil = 0;
       this._cardOpen = false;

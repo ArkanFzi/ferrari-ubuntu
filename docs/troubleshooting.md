@@ -276,3 +276,50 @@ baru ternyata **tidak** — keyakinan lama itu dibantah `idle-hide-ms`: `.xml`
 dikopi + dikompilasi ke folder terpasang, disable/enable, dan shell yang sama
 langsung membaca kunci baru itu (island tidur 6 dtk setelah dibiarkan).
 Kalau setelah reload island terlihat aneh, `--rollback` lebih dulu, baru logout.
+
+## 17. Island "muncul" tapi nol pixel: `ease()` geometri mati di Wayland
+
+Keluhan: pointer sudah diarahkan ke daerah notch, pill melebar jadi card,
+`visible=true`, `opacity=255` — dan tidak ada yang tergambar sama sekali. Di rig
+Xephyr gejala ini **tidak pernah muncul**, jadi tiga putaran pengujian pertama
+membacanya hijau.
+
+A/B pada actor yang sama di sesi Wayland yang sedang berjalan:
+
+```
+island.ease({height: 72, ...})  -> get_preferred_height() 0..0 sampai +1500 ms
+island.set_size(460, 72)        -> alloc=460x72 seketika
+island.ease({opacity: 0})       -> mendarat, onComplete fires
+```
+
+Jadi yang busuk adalah transisi properti **geometri**, bukan animasi pada umum-
+nya. Aturan mainnya sekarang: geometri selalu `set_size()`/`set_position()`,
+yang boleh dianimasikan hanya opacity (`_fadeTo()`). Kalau nanti ada yang
+mengembalikan `ease({width, height, x, y})` karena "di rig jalan", itu bukan
+bukti — rig-nya X11.
+
+Tiga hal lain yang muncul dari laporan yang sama, semuanya tertangkap rig:
+
+- **Zona hover diukur dari card, bukan dari pill.** `HOVER_IN_*` dulu 120x44
+  (seukuran pill), padahal yang dicari pointer bentuk yang baru saja dilihatnya:
+  card notif 460 px = 230 px dari sumbu, 72 px ke bawah. Sekarang 250x100 dengan
+  dead band keluar 300x124.
+- **Card media menutup sendiri di tengah pointer.** Jam `idle-hide-ms` menjatuh-
+  kan `_cardOpen` tanpa melihat pointer; `_awake()` sudah memperlakukan
+  `hoverOn` sebagai bangun, jadi tick yang sama saling membantah. Card sekarang
+  bertahan selama pointer masih di atasnya — tanpa itu "klik kolom teks untuk
+  menutup" tidak pernah sempat dipanggil.
+- **`St.Button` di shell 46 tidak punya properti `x_fill`.** Menuliskannya di
+  konstruktor membunuh seluruh extension saat dimuat; yang terbaca di journal
+  cuma satu baris:
+
+  ```
+  noir-island: gagal memuat .../island.js: No property x_fill on StButton
+  ```
+
+  Island hilang total tanpa status ERROR di `gnome-extensions list`. Pengisi
+  lebar di 46 adalah `x_align: Clutter.ActorAlign.FILL` (+ `x_expand`).
+
+Kalau island hilang setelah perubahan UI, perintah pertama yang harus jalan
+adalah `journalctl /usr/bin/gnome-shell -b | grep noir-island` — error pemuatan
+ada di sana, bukan di `gnome-extensions info`.

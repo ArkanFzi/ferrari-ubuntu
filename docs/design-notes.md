@@ -395,6 +395,91 @@ state saja, dan Ubuntu memblokir dua jalur pintas: `org.gnome.Shell.Eval`
   ikut dicetak di setiap baris state (`... 452x67 @574,32 panel=32`) supaya
   sesi live bisa dihakimi dari journal saja.
 
+### Card setinggi 0 di Wayland: `ease()` geometri tidak pernah mendarat
+
+Kelanjutan laporan yang sama, kali ini dengan pointer yang benar-benar diarahkan
+ke island: pill melebar jadi card 460 px, `visible=true`, `opacity=255`, dan
+**nol pixel tergambar**. Dua sampel berjarak 1 dtk (`+1,9 s` dan `+2,9 s` sesudah
+kartu notifikasi terakhir) membuktikan ini bukan snapshot di tengah transisi —
+`get_preferred_height()` membisu di `0..0` sampai selamanya.
+
+A/B pada actor yang sama di sesi live yang sedang berjalan, tanpa menyentuh repo:
+
+- `island.ease({height: 72, ...})` → `prefH` tetap `0..0` setelah 1500 ms.
+- `island.set_size(460, 72)` pada actor yang sama → langsung `alloc=460x72`.
+- `island.ease({opacity: 0})` → **jalan** (fade `_stow()` mendarat dan
+  `onComplete`-nya fires).
+
+Jadi kerusakannya spesifik pada *properti geometri yang dianimasikan*, dan hanya
+di Wayland: di X11/Xephyr transisi geometri dapat frame, itu sebabnya rig selalu
+hijau dan bugnya lolos dari tiga putaran pengujian. Yang diubah:
+
+- **`_animateTo()` menulis ukuran akhir lewat `set_size()` + `set_position()`**,
+  bukan `ease({width, height, x, y})`. Yang boleh dianimasikan hanyalah opacity,
+  dan itu memang sudah dikerjakan `_fadeTo()`.
+- **`_unstash()` ikut mematok geometri** (`remove_all_transitions()` lalu
+  `set_size`/`set_position`/`set_opacity(255)`/`visible`) supaya bangun dari
+  bezel tidak lagi bergantung pada transisi yang sama.
+- **Zona hover diukur dari card terlebar, bukan dari pill.** `HOVER_IN_Y`
+  44 → 100 dan `HOVER_IN_X` 120 → 250: yang dicari pointer adalah bentuk yang
+  baru saja dilihatnya (card notif 460 px = 230 px dari sumbu, card tertinggi
+  72 px di bawah panel), sementara pill yang tersisa hanya 240x34. Dead band
+  keluar dibiarkan 24 px/50 px lebih longgar supaya ambangnya tidak berkedip.
+- **Jalan pulang dari card media = klik kolom teksnya.** Bukan tombol ✕ baru dan
+  bukan outside-click: `_armOutside()` bergantung pada `captured-event` di stage
+  yang di Wayland tidak terkirim, jadi satu-satunya affordance yang terbukti
+  bekerja adalah klik pada isi card itu sendiri. Kolom judul/artis/album dibungkus
+  `St.Button` (`_mediaCollapse`) yang memanggil `_collapse()`, simetris dengan
+  klik pill yang membuka card.
+
+`St.Button` di shell 46 **tidak punya properti `x_fill`** — menulisnya di
+konstruktor membuat seluruh extension mati saat dimuat
+(`gagal memuat .../island.js: No property x_fill on StButton`), dan rig
+menangkapnya dalam hitungan detik. Pengisi lebar di 46 adalah
+`x_align: Clutter.ActorAlign.FILL` (+ `x_expand`).
+
+### Rig R: apa yang harus disetel dulu supaya Xephyr bisa menghakimi
+
+Rig R (Xephyr `:11`, 1280x800, kanvas hijau murni) sempat hijau-palsu lima
+putaran karena alat ukurnya sendiri, bukan karena produknya. Hasil akhirnya
+12/12 terhadap build yang sama dengan yang dipakai laporan user:
+
+```
+R1-CARD-PENUH          OK  notif 460x72 -> 96% pixel (dulu 0 px di Wayland)
+R1B-RAIL-ROSSO         OK  44 baris merah di tepi kiri card notif
+R1A-BASELINE-TIDUR     OK  0 px saat tidur
+R2-HOVER-TEPI          OK  pill bangun di x=-200 dari sumbu
+R2B-TEPI-LUAR          OK  tidak bangun di x=-300 (0 unhide baru)
+R3A-MEDIA-CARD         OK  klik pill -> card 420x76 tergambar penuh
+R4-PROGRESS-AKTIF      OK  fill rosso 18 px di dasar card
+R4-PROGRESS-BERTAMBAH  OK  18 px -> 26 px dalam 8 dtk, posisi benar disampel
+R3B-KLIK-TUTUP         OK  klik kolom teks -> pill 240x34 kembali
+```
+
+Yang harus disetel supaya Xephyr bisa menghakimi:
+
+- **dconf harus ditetaskan di sesi yang berhenti rapi.** `dconf-service`
+  menampung tulisan di memori dan baru menetes ke `~/.config/dconf/user` saat
+  bus ditutup; write di dalam `dbus-run-session` yang menghidupkan gnome-shell
+  (sesi ini dimatikan SIGTERM) tidak pernah mendarat, shell membaca default
+  skema Ubuntu, dan dock/DING ikut tergambar di atas kanvas hijau.
+- **Ubuntu 46 memakai whitelist `enabled-extensions`**, bukan cuma
+  `disabled-extensions`: tanpa daftar itu extension user melaporkan
+  `state: 6, enabled: false, error: ''` — gagal tanpa pesan.
+- **`log()` GJS keluar lewat stderr shell.** `gnome-shell --x11 >/dev/null 2>&1`
+  membuat seluruh assertion berbasis log buta dan boot loop mengira rig siap.
+- **`notify-send -A` itu blocking** sampai notifikasinya ditutup — rig menggantung
+  persis di langkah kartu notifikasi. Tanpa aksi, atau pakai `timeout`.
+- **Satu WM per display.** Sisa `gnome-shell --x11` dari run sebelumnya membuat
+  shell baru mati dengan `Failed to acquire window manager ownership`, dan rig
+  mengukur desktop kosong tanpa bilang begitu.
+- **Shell di Xephyr melaporkan monitor lebih lebar dari layarnya** (kartu 460 px
+  mendarat di `@570,32` pada layar 1280 → pusat 800, bukan 640). Semua kotak ukur
+  sekarang dibaca dari geometri di baris log island, bukan diasumsikan tengah.
+- **Shell X11 kadang naik dalam overview** (dash + "Type to search" menutup
+  kanvas); Escape sampai titik-titik uji benar-benar hijau, dan titik uji
+  menghindari lajur x<170 milik strip dash.
+
 ### Jam kartu media: posisi harus ditanya, bukan dihitung
 
 Kartu media live menampilkan **"44:17 / 4:04"** sementara `Position` di bus
