@@ -66,5 +66,14 @@
         notifikasi baru yang membangunkannya lagi. Nol = island tidak pernah
         tidur selama ada trek.</description>
     </key>
+    <key name="ambient-clock" type="b">
+      <default>false</default>
+      <summary>Jam boleh mengisi slot ambient</summary>
+      <description>Slot ambient adalah isi pil saat tidak ada notifikasi dan tidak
+        ada trek. Secara historis slot ini diisi jam dan tanggal — persis angka
+        yang sudah duduk 30 px di atasnya di panel — jadi defaultnya mati: pil
+        yang tidak punya apa-apa untuk dikatakan hanya menampilkan titik rosso.
+        Nyalakan kalau island memang dipakai sebagai jam kedua.</description>
+    </key>
   </schema>
 </schemalist>

@@ -69,6 +69,7 @@ const OPT = {
   'hold-hover-extra-ms': 'holdHoverExtra',
   'peek-ms': 'peekMs',
   'idle-hide-ms': 'idleHide',
+  'ambient-clock': 'ambientClock',
 };
 // Hover dibaca lewat polling global.get_pointer(), bukan captured-event MOTION
 // (di X11 tidak terkirim ke stage saat klien memegang pointer grab, jadi mati
@@ -170,6 +171,8 @@ export class Island {
     this._geo = '';
     this._mon = null;
     this._axis = null;
+    this._ambientId = '-';
+    this._providerList = null;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -1028,6 +1031,44 @@ export class Island {
     return x >= ax && x <= ax + aw && y >= ay && y <= ay + ah;
   }
 
+  // ---------------------------------------------------------------- ambient
+  // Slot ambient adalah isi pil saat tidak ada notifikasi dan tidak ada trek.
+  // Dia bukan state baru: _decideState() tetap menyebutnya 'idle', yang berubah
+  // hanya siapa yang mengisi teksnya.
+  //
+  // Urutan array = prioritas, dan hanya satu yang menang. Tidak ada rotasi
+  // otomatis: konten yang muncul sendiri tanpa diminta adalah alasan orang
+  // mematikan fitur (Apple HIG Live Activities), dan rotasi menuntut jam kedua
+  // yang tidak mau kita bayar.
+  //
+  // Kontraknya sengaja tiga hal. nilai() adalah satu-satunya alasan pil berubah
+  // — perbandingan itu sudah ada di kunci lukisan _render(), jadi ambang "hanya
+  // kalau berubah" tidak perlu ditulis ulang per sumber. kicker() memutuskan
+  // apakah sumber itu boleh membawa jam (sumber ambient tidak mewarisi jam
+  // default; dulu pil idle selalu menampilkan angka yang sama dengan yang 30 px
+  // di atasnya). enabled() adalah sakelar user.
+  _providers() {
+    return this._providerList ??= [
+      {
+        id: 'clock',
+        enabled: () => this._opt.ambientClock,
+        kicker: () => true,
+        // Tanggal, bukan menit: menit sudah ikut ke kunci lukisan pill lewat
+        // `jam`, jadi memasukkannya ke sini hanya membuat signature isi berganti
+        // tiap 60 dtk seolah ada yang baru.
+        nilai: () => GLib.DateTime.new_now_local().format('%a %d %b'),
+      },
+    ];
+  }
+
+  // Provider yang boleh tampil sekarang: yang pertama enabled() dan punya nilai.
+  _ambient() {
+    for (const p of this._providers())
+      if (p.enabled() && p.nilai())
+        return p;
+    return null;
+  }
+
   // Satu-satunya tempat yang memutuskan state mana yang BOLEH tampil. Aturan
   // "isi" di _hasContent() harus dibaca dari sini, bukan dari daftarnya sendiri:
   // dulu trek Playing di bawah jendela fullscreen ditolak di sini tapi tetap
@@ -1097,8 +1138,11 @@ export class Island {
       return `media|${m.title}|${m.artist}|${m.album}|${player.status}`
         + `|${player.canPrev}${player.canNext}|${m.key ?? m.title}`;
     }
+    const p = this._ambient();
+    this._ambientId = p?.id ?? '-';
     const resting = player?.meta?.title ? player : null;
-    return `idle|${resting ? resting.meta.title : ''}|${this._pending.length}`;
+    return `idle|${this._ambientId}|${p ? p.nilai() : ''}`
+      + `|${resting ? resting.meta.title : ''}|${this._pending.length}`;
   }
 
   _render() {
@@ -1185,20 +1229,30 @@ export class Island {
       this._animateTo(level, content);
     const asal = content === 'media' ? player.identity
       : content === 'notif' ? String(this._showing?.src?.title ?? '?') : '';
-    log(`noir-island: ${asal ? `${content} <- ${asal}` : content} ${level} ${this._geo}`);
+    // ambient ikut dicetak: provider adalah satu-satunya bagian island yang tidak
+    // bisa dibuktikan dari screenshot (pil kosong dan pil mati terlihat sama),
+    // dan rig membacanya dari sini.
+    const amb = content === 'idle' ? ` ambient=${this._ambientId ?? '-'}` : '';
+    log(`noir-island: ${asal ? `${content} <- ${asal}` : content} ${level} ${this._geo}${amb}`);
     this._state = content;
     this._level = level;
     this._shape = bentuk;
   }
 
   _fillPill(player, content, jam) {
-    // Pill selalu membawa jam di slot kicker. Di level pill jam panel masih duduk
-    // di tempatnya dan angka ini cuma pengiring; di peek/card dialah pengganti
-    // jam panel, jadi island tidak boleh memakan jam lalu menggantinya dengan
-    // judul lagu.
-    this._pillKicker.set_text(jam);
-    this._pillText.set_text(content === 'media' ? player.meta.title
-      : GLib.DateTime.new_now_local().format('%a %d %b'));
+    // Pill media selalu membawa jam di slot kicker: di level pill angka itu cuma
+    // pengiring, di peek/card dialah pengganti jam panel — island tidak boleh
+    // memakan jam lalu menggantinya dengan judul lagu. Slot ambient berbeda: di
+    // sana provider yang memutuskan, dan tanpa provider pil memang hanya berisi
+    // titik rosso.
+    if (content === 'media') {
+      this._pillKicker.set_text(jam);
+      this._pillText.set_text(player.meta.title);
+    } else {
+      const p = this._ambient();
+      this._pillKicker.set_text(p?.kicker() ? jam : '');
+      this._pillText.set_text(p?.nilai() ?? '');
+    }
     // Antrean tetap terlihat saat island diam: notifikasi yang tertahan
     // (fullscreen / DND) tidak boleh hilang tanpa jejak.
     const queued = this._pending.length;
@@ -1936,5 +1990,11 @@ export class Island {
     } else {
       this._stowAt = monoMs() + STOW_GRACE_MS;
     }
+    // Slot ambient ikut diuji tiap tick, bukan hanya saat ada kejadian: provider
+    // adalah satu-satunya isi yang bisa berubah tanpa sinyal apa pun (nilai
+    // sensor, agenda berikutnya, cuaca). _render() sudah memotong di kunci
+    // lukisan dan di cek "tidur tanpa isi", jadi memanggilnya buta tiap 500 dtk
+    // lebih murah daripada merawat jam kedua yang bisa bocor saat disable().
+    this._render();
   }
 }

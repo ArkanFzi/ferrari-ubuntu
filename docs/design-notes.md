@@ -787,6 +787,74 @@ kartu 460 px bergeser dari `@570` ke `@616`, dan R2/R2B (hover di tepi, mati di
 x=-300) tetap lolos dengan sumbu baru. Live: `card 460x72 @767,28 panel=28
 sumbu=997`, 0 JS ERROR.
 
+## TIER 29 — slot ambient: satu pil, banyak penyedia
+
+Slot idle pil dulu diisi dengan satu baris hardcoded: `format('%a %d %b')` —
+tanggal yang sama yang sudah duduk 30 px di atasnya di panel. Tahap ini
+memecahnya jadi registry: `_providers()` mengembalikan daftar bernilai
+`{id, enabled(), kicker(), nilai()}`, `_ambient()` mengambil yang pertama yang
+`enabled()` **dan** punya nilai, dan `_fillPill()` hanya boleh menulis lewat dia.
+Kontraknya tiga hal dan sengaja kecil:
+
+- `nilai()` adalah satu-satunya alasan pil berubah. Ambang "hanya kalau berubah"
+  tidak perlu ditulis ulang per sumber karena perbandingan itu sudah ada di
+  `kunci` lukisan `_render()` — signature idle ikut membawa `ambientId` dan
+  nilainya, jadi provider baru otomatis terverifikasi oleh mesin yang sama.
+- `kicker()` memutuskan boleh tidaknya membawa jam. Provider ambient **tidak**
+  mewarisi jam default; tanpa provider, slot kicker dan teks pil memang kosong.
+- `enabled()` sakelar user (`ambient-clock`, default **false**).
+
+Urutan array = prioritas, hanya satu yang menang, dan **tidak ada rotasi
+otomatis**. Konten yang muncul sendiri tanpa diminta adalah alasan orang
+mematikan fitur (Apple HIG Live Activities), dan rotasi menuntut jam kedua.
+
+### Yang sengaja TIDAK diubah provider: kapan pil boleh bangun
+
+`_hasContent()` tetap `idle` berarti kosong — provider ambient tidak menahan
+island di liangnya dan tidak membatalkan `stow`. Live setelah toggle dinyalakan:
+`notif <- noir-probe card 460x72 @767,28 sumbu=997` lalu `stow`, tanpa satu pun
+baris `idle pill`. Yang berubah hanya **isi** pil saat island sudah bangun
+(hover, atau celah antar trek), bukan **kapan** dia bangun. Itu konsisten dengan
+benchmark: closed state boring.notch adalah `Rectangle().fill(.clear)` dan
+Dynamic Island tidak menampilkan konten ambient sama sekali. Kalau nanti ambient
+harus selalu terlihat, itu keputusan `_hasContent()` — bukan `_providers()`.
+
+## Rig hitam total: shell tidak melukis satu frame pun tanpa damage
+
+Kanvas `:11` terbaca hitam pekat (0 px non-hitam, termasuk strip panel) sementara
+`noir-island: aktif` tercatat, 0 JS ERROR, dan seluruh assertion pixel mati di
+R0B. Yang sudah disingkirkan sebelum akar ketemu: dua rig paralel (sudah ada
+`flock`), posisi jendela host (di-pin ke 0,0, `IsViewable`, tetap hitam), DPMS
+sudah off, dan resolusi (di-xrandr balik ke 1280x800, tetap hitam).
+
+Akar sebenarnya: **shell X11 tidak melukis satu frame pun sampai ada yang
+mengubah panggungnya.** `xdotool` pointer-warp, klik di wallpaper, dan
+Super+Escape tidak mengubah apa pun secara visual — jadi frame pertama tidak
+pernah datang dan framebuffer Xephyr tetap berisi nol. Terukur pada sesi yang
+sama, hitam sepanjang 25 dtk: `super+esc -> 0 px non-hitam`, lalu satu jendela
+X11 sungguhan dipeta dan dibunuh -> **921.888 px hijau** plus panel. `bangunkan()`
+sekarang memetakan `xeyes 64x48` di sudut kanan-bawah (di luar semua titik uji)
+sebagai alarm, dan rig hijau lagi: 16/16, termasuk dua assertion lama
+(R4-PROGRESS-BERTAMBAH, R3B-KLIK-TUTUP) yang selama ini GAGAL karena sebab yang
+sama, bukan karena regresi island.
+
+## Gigi assertion: terang, bukan "bukan hijau"
+
+`hit()` menghitung non-hijau, dan card hitam pekat 460x72 sudah 100% non-hijau —
+jadi dia tidak bisa membedakan card berisi dari card kosong. Itulah lubang yang
+membuat regresi opacity bulan ini lolos tiga putaran tes. `terang()` menghitung
+luminans netral (r,g,b semuanya > 105). Terukur: card notif 392 px, card media
+493 px, pill 161 px, desktop bersih dan island tidur sama-sama 0.
+
+Giginya diuji dengan probe, bukan dengan kepercayaan: kicker+title+body notif
+dan kicker+text pill dikosongkan sementara -> `R1C-TEKS-NOTIF: GAGAL (0 px)` dan
+`R3-TEKS-PILL: GAGAL (33 px)`, sisanya tetap hijau. Probe pertama sempat menipu
+dua kali: (1) kotak R1C selebar card, sehingga ikon dan tombol Tutup/Buka
+mencukupi ambang walau teks hilang — kolom terang terukur duduk di 37-52 (ikon),
+74-142 (teks), 351-435 (tombol), jadi kotaknya dipindah ke 64..330; (2) hanya
+kicker yang dikosongkan sementara title/body masih melukis. Rig yang tidak pernah
+gagal bukan tes, dan tes yang gagal karena probe yang salah juga bukan tes.
+
 ## Yang sengaja tidak diubah
 
 Dock tetap full-height dan fixed (permintaan eksplisit). Thumbnail workspace di
