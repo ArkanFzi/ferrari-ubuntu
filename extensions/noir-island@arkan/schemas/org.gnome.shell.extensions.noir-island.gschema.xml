@@ -75,5 +75,14 @@
         yang tidak punya apa-apa untuk dikatakan hanya menampilkan titik rosso.
         Nyalakan kalau island memang dipakai sebagai jam kedua.</description>
     </key>
+    <key name="ambient-mic" type="b">
+      <default>true</default>
+      <summary>Mikrofon yang sedang dipakai boleh membunyikan pil</summary>
+      <description>Satu-satunya penyedia ambient yang boleh membangunkan island:
+        ada yang merekam adalah keadaan yang harus diketahui, bukan konten yang
+        dipilih user untuk dilihat. Yang ditampilkan bukan hanya "ada yang
+        merekam" — dot privacy di kanan atas sudah bilang begitu — tapi aplikasi
+        mana. Mati = pil tidak pernah bicara soal mikrofon.</description>
+    </key>
   </schema>
 </schemalist>

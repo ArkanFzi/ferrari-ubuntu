@@ -6,6 +6,7 @@ import Clutter from 'gi://Clutter';
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Gvc from 'gi://Gvc';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
@@ -70,6 +71,7 @@ const OPT = {
   'peek-ms': 'peekMs',
   'idle-hide-ms': 'idleHide',
   'ambient-clock': 'ambientClock',
+  'ambient-mic': 'ambientMic',
 };
 // Hover dibaca lewat polling global.get_pointer(), bukan captured-event MOTION
 // (di X11 tidak terkirim ke stage saat klien memegang pointer grab, jadi mati
@@ -179,7 +181,11 @@ export class Island {
     this._mon = null;
     this._axis = null;
     this._ambientId = '-';
+    this._ambientNilai = '';
     this._providerList = null;
+    this._micOn = false;
+    this._micLabel = '';
+    this._mixer = null;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -237,6 +243,7 @@ export class Island {
 
     this._startTray();
     this._startMpris();
+    this._startMic();
     this._fullscreen = !!Main.layoutManager.primaryMonitor?.inFullscreen;
     this._tickId = GLib.timeout_add(GLib.PRIORITY_LOW, TICK_MS, () => {
       this._tick();
@@ -304,6 +311,15 @@ export class Island {
     for (const e of this._players.values())
       e.proxy.run_dispose();
     this._players.clear();
+
+    // Stream Gvc adalah objek milik mixer; melepas koneksi ke server suara harus
+    // terjadi sebelum referensinya dibuang, kalau tidak stream terakhir tertahan
+    // dan _micOn masih bisa dibaca hidup sesudah island mati.
+    if (this._mixer) {
+      this._mixer.close();
+      this._mixer = null;
+    }
+    this._micOn = false;
 
     if (this._island) {
       Main.layoutManager.removeChrome(this._island);
@@ -812,7 +828,7 @@ export class Island {
         return 'pill';
       return this._hoverOn ? 'pill' : null;
     }
-    return this._hoverOn ? 'pill' : null;
+    return this._hoverOn || this._privacy() ? 'pill' : null;
   }
 
   // Ada aksi baru = island boleh menempel lagi `idle-hide-ms`. Hitung mundurnya
@@ -832,10 +848,11 @@ export class Island {
   // Isi = sesuatu yang boleh tampil (aturan ada di _decideState) plus notifikasi
   // yang masih mengantre, karena pill +N menahan jejaknya, plus pointer yang
   // sedang berdiri dekat panel: tanpa clause terakhir, grace _tick() akan
-  // menidurkan pill jam di tengah hover.
+  // menidurkan pill jam di tengah hover. Clause privacy adalah pengecualian
+  // sadar atas doktrin TIER 29 — lihat _privacy().
   _hasContent(player) {
     return this._decideState(player) !== 'idle' || this._pending.length > 0 ||
-      this._hoverOn;
+      this._hoverOn || this._privacy();
   }
 
   // Mundur ke dalam panel: tinggi menyusut ke 0 sambil seluruh card memudar,
@@ -1062,6 +1079,15 @@ export class Island {
   _providers() {
     return this._providerList ??= [
       {
+        id: 'mic',
+        enabled: () => this._privacy(),
+        kicker: () => false,
+        // Aplikasi, bukan sekadar "mikrofon": dot privacy di kanan atas sudah
+        // mengatakan BAHWA ada yang merekam; yang tidak bisa ia katakan adalah
+        // SIAPA. Nilainya disiapkan _syncMic(), tidak dipindai saat render.
+        nilai: () => this._micLabel,
+      },
+      {
         id: 'clock',
         enabled: () => this._opt.ambientClock,
         kicker: () => true,
@@ -1079,6 +1105,87 @@ export class Island {
       if (p.enabled() && p.nilai())
         return p;
     return null;
+  }
+
+  // Tenant privacy. Gvc jalan di DALAM proses shell — typelib-nya ikut paket
+  // gnome-shell dan menu volume sudah lebih dulu memakainya — jadi "ada yang
+  // merekam" adalah sinyal yang datang, bukan keadaan yang harus ditanya: tanpa
+  // subprocess, tanpa polling, dan tanpa 6,6 MB pw-dump tiap beberapa detik.
+  // Kamera sengaja TIDAK lewat sini: tidak ada sinyal in-proses untuknya.
+  _startMic() {
+    // Batas eksternal: MixerControl adalah koneksi ke server suara — ia bisa
+    // gagal (typelib beda, PipeWire tidak jalan, sesi headless). Harganya pernah
+    // terukur: enable() melempar SEBELUM _tick() dipasang, jadi island hidup
+    // separuh — kartu notifikasi tergambar tapi tidak pernah maju atau tidur —
+    // dan rig merah 13 tes sambil terlihat hidup. Satu tenant tidak boleh bisa
+    // mematikan seluruh island.
+    try {
+      this._mixer = Gvc.MixerControl.new('noir-island');
+      this._on(this._mixer, 'stream-added', () => this._syncMic());
+      this._on(this._mixer, 'stream-removed', () => this._syncMic());
+      // open() dan jumlah stream dicetak sekali di sini: tanpa baris ini, rig
+      // tidak bisa membedakan "mixer tidak terhubung" dari "terhubung tapi tidak
+      // pernah melihat rekaman" — dan obat untuk keduanya beda.
+      const buka = this._mixer.open();
+      log(`noir-island: mixer buka=${buka} `
+        + `stream=${(this._mixer.get_source_outputs() ?? []).length}`);
+      this._syncMic();
+    } catch (e) {
+      this._mixer = null;
+      log(`noir-island: Gvc mati: ${e.message}`);
+    }
+  }
+
+  // Source-output = stream yang MEMBACA sebuah sumber. TANPA filter state, dan
+  // itu terukur bukan diasumsikan: pipewire-pulse melaporkan stream-nya sebagai
+  // GVC_STREAM_STATE_INVALID dan is_running() False padahal rekaman sedang
+  // berjalan (probe pw-record: 8 baris state=INVALID running=False, lalu 0 stream
+  // setelahnya). Menyaring pada state akan membunuh tenant ini diam-diam — persis
+  // kegagalan R6 pertama. Yang tersisa hanyalah keberadaan stream, dan itu cukup:
+  // dia lahir saat ada yang merekam dan mati saat berhenti.
+  _recorder() {
+    if (!this._mixer)
+      return null;
+    return (this._mixer.get_source_outputs() ?? [])[0] ?? null;
+  }
+
+  // Yang diisi server suara untuk stream rekaman: application_id kosong untuk
+  // klien PipeWire (terukur: None), get_name() berisi nama klien — 'PW-CAT' untuk
+  // pw-record, 'Firefox' untuk peramban. ID D-Bus/flatpak dipotong ke nama paling
+  // kanan supaya muat di pil 240 px.
+  _micApp(s) {
+    const id = String(s.get_application_id() ?? '');
+    const dariId = id.split('.').filter(x => x && !/^\d+$/.test(x)).pop();
+    return String(dariId || s.get_name() || 'Mikrofon').toUpperCase();
+  }
+
+  // Edge-trigger: yang membangunkan island hanyalah perpindahan tidak-ada ->
+  // ada. Stream yang lahir dan mati beruntun (ganti device, stream dipindah)
+  // tidak boleh jadi kedip, dan matinya rekaman tidak boleh menambah jatah bangun.
+  _syncMic() {
+    const s = this._recorder();
+    const sebelum = this._micOn;
+    if (s && !sebelum)
+      this._wake();
+    this._micOn = !!s;
+    // Label dihitung di sini, bukan di dalam nilai(): _render() berjalan tiap
+    // 500 dtk, dan memindai daftar stream setiap kali artinya membayar kembali
+    // polling yang baru saja kita hindari dengan memakai Gvc.
+    this._micLabel = s ? `MIK ${this._micApp(s)}` : '';
+    // Hanya perpindahan yang dicetak: "pil tidak bangun" dan "mixer tidak pernah
+    // mendapat sinyal" terbaca sama di layar, dan yang pertama itu bug island
+    // sementara yang kedua bukan.
+    if (!!s !== sebelum)
+      log(`noir-island: mic ${s ? `nyala ${this._micLabel}` : 'mati'}`);
+    this._render();
+  }
+
+  // Satu-satunya ambient yang boleh menghitung sebagai ISI. Doktrin TIER 29
+  // melarang provider menahan island di liangnya karena konten yang muncul
+  // sendiri tanpa diminta adalah alasan orang mematikan fitur; keadaan "mic
+  // sedang dipakai" bukan konten, dia peringatan.
+  _privacy() {
+    return this._micOn && this._opt.ambientMic;
   }
 
   // Satu-satunya tempat yang memutuskan state mana yang BOLEH tampil. Aturan
@@ -1154,8 +1261,9 @@ export class Island {
     }
     const p = this._ambient();
     this._ambientId = p?.id ?? '-';
+    this._ambientNilai = p ? p.nilai() : '';
     const resting = player?.meta?.title ? player : null;
-    return `idle|${this._ambientId}|${p ? p.nilai() : ''}`
+    return `idle|${this._ambientId}|${this._ambientNilai}`
       + `|${resting ? resting.meta.title : ''}`;
   }
 
@@ -1253,7 +1361,12 @@ export class Island {
     // ambient ikut dicetak: provider adalah satu-satunya bagian island yang tidak
     // bisa dibuktikan dari screenshot (pil kosong dan pil mati terlihat sama),
     // dan rig membacanya dari sini.
-    const amb = content === 'idle' ? ` ambient=${this._ambientId ?? '-'}` : '';
+    const amb = content === 'idle'
+      ? ` ambient=${this._ambientId ?? '-'}`
+        // Nilainya ikut, bukan hanya id: "siapa yang merekam" adalah satu-satunya
+        // alasan tenant privacy ada, dan screenshot tidak bisa membacanya.
+        + (this._ambientNilai ? `:${this._ambientNilai}` : '')
+      : '';
     log(`noir-island: ${asal ? `${content} <- ${asal}` : content} ${level} ${this._geo}${amb}`
       + ` antre=${badge}`);
     this._state = content;

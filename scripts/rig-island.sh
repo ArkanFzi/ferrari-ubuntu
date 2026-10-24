@@ -837,6 +837,60 @@ else
   check R5C-AKTOR-MATI OK
 fi
 parkir
+
+# ------------------------------------------- R6 tenant privacy: mic lewat Gvc
+# Tiga hal yang terbedakan dari log island, dan tidak bisa dibaca dari pixel:
+#  BANGUN        — pil muncul tanpa satu pun gerakan pointer (pointer diparkir).
+#  TIDAK-BERKEDIP— dua stream tumpang tindih tidak boleh menghasilkan dua unhide.
+#  SAKELAR       — ambient-mic=false memutus jalurnya sampai habis.
+# Efek samping yang disadari: PipeWire itu per-user, bukan per-sesi, jadi rekaman
+# tiruan di sini juga menyalakan dot privacy di desktop asli beberapa detik.
+say "R6 mic tenant"
+parkir
+tidur_island || echo "  (sebelum R6 island belum tidur: $(baris_terakhir))"
+R6A=$(titik)
+pw-record --rate 8000 --channels 1 /dev/null >/dev/null 2>&1 &
+M1=$!
+if tunggu_baru 'ambient=mic' $R6A 12; then
+  BARIS=$(baris_terakhir)
+  case "$BARIS" in
+    *' pill '*MIK*) check R6-MIC-BANGUN OK ;;
+    *) check R6-MIC-BANGUN GAGAL "bangun, tapi bukan pil berlabel MIK: $BARIS" ;;
+  esac
+else
+  check R6-MIC-BANGUN GAGAL "tak ada baris ambient=mic selama 6 dtk rekaman, padahal pointer diparkir: $(baris_terakhir)"
+fi
+sleep 1.0
+pw-record --rate 8000 --channels 1 /dev/null >/dev/null 2>&1 &
+M2=$!
+sleep 2.5
+UNHIDE=$(tail -n +$((R6A + 1)) "$RIG/shell.out" | grep -ac 'noir-island: unhide')
+STOW=$(tail -n +$((R6A + 1)) "$RIG/shell.out" | grep -ac 'noir-island: stow')
+if [ "$UNHIDE" = "1" ] && [ "$STOW" = "0" ]; then
+  check R6-MIC-TIDAK-BERKEDIP OK
+else
+  check R6-MIC-TIDAK-BERKEDIP GAGAL "$UNHIDE unhide dan $STOW stow selama dua stream tumpang tindih, harusnya 1 dan 0"
+fi
+kill $M1 $M2 2>/dev/null
+R6B=$(titik)
+if tunggu_baru 'noir-island: stow' $R6B 20; then
+  check R6-MIC-LEPAS OK
+else
+  check R6-MIC-LEPAS GAGAL "rekaman sudah mati tapi island tidak tidur (idle-hide-ms 6000): $(baris_terakhir)"
+fi
+S0=$(titik)
+rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-mic false
+sleep 1.0
+pw-record --rate 8000 --channels 1 /dev/null >/dev/null 2>&1 &
+M3=$!
+sleep 3.0
+kill $M3 2>/dev/null
+if tail -n +$((S0 + 1)) "$RIG/shell.out" | grep -qa 'ambient=mic'; then
+  check R6-MIC-SAKELAR GAGAL "ambient-mic=false masih melukis mic: $(baris_terakhir)"
+else
+  check R6-MIC-SAKELAR OK
+fi
+rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-mic true
 # Hanya error dari jalur noir-island yang dihitung: DING mengeluh soal ~/Desktop
 # yang memang tidak ada di HOME rig, dan itu bukan regresi island.
 JS=$(grep -a "noir-island" "$RIG/shell.out" | grep -ac "JS ERROR\|TypeError\|SyntaxError")

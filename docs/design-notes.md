@@ -896,6 +896,72 @@ terlihat tuntas kembali ke baseline supaya R5B dan R5C tidak mengukur di atas si
 tes sebelumnya — karena record yang tidak pernah tampil **memang** tidak pernah
 terbayar, semua assertion badge dipakai sebagai **selisih**, bukan angka mutlak.
 
+## TIER 31 — tenant privacy: satu-satunya ambient yang boleh mengetuk pintu
+
+Tahap 3 Blueprint bukan "tampilkan status mic", tapi "siapa boleh membangunkan
+pil". Kontrak TIER 29 bilang provider ambient **tidak** menahan island di liangnya.
+Mikrofon yang sedang direkam adalah pengecualian sadar atas kontrak itu, dan ia
+sengaja ditulis di dua tempat supaya suatu hari bisa dicabut sekaligus:
+
+- `_privacy()` = `_micOn && _opt.ambientMic` — satu definisi, dipakai `_hasContent()`
+  (island tidak boleh tidur selama ada yang merekam) **dan** `_levelFor()` branch
+  idle (pil boleh naik tanpa hover). Privacy yang diturunkan jadi dot panel saja =
+  kedua clause itu dicabut bersamaan, bukan salah satunya.
+- Sakelar `ambient-mic` default **true**, lawan `ambient-clock` yang false. Alasannya
+  bukan estetika: jam adalah konten yang enak dimatikan, privacy adalah fakta yang
+  tidak boleh hilang hanya karena orang tidak menemukan pengaturannya.
+
+### Gvc hidup di dalam proses shell, dan dia berbohong soal state
+
+`import Gvc from 'gi://Gvc'` resolve karena `/usr/lib/gnome-shell/Gvc-1.0.typelib`
+ikut paket gnome-shell — tidak ada daemon baru, tidak ada subservice, tidak ada
+dependensi yang harus dipasang. Semuanya terukur pada sesi rig yang sama:
+
+- Konstruktornya `Gvc.MixerControl.new(name)`. Versi tanpa argumen melempar
+  `Gvc.new: At least 1 argument required, but only 0 passed`.
+- `open()` mengembalikan **False** saat enable(): koneksinya async, stream baru
+  datang lewat `stream-added`/`stream-removed`. Baris `mixer buka=false stream=0`
+  di log adalah kondisi normal, bukan kegagalan.
+- Saat `pw-record` **benar-benar** merekam, stream-nya dilaporkan dengan
+  `is_running()` False dan `get_state()` = `GVC_STREAM_STATE_INVALID`. Jadi tidak
+  ada filter state sama sekali: `_recorder()` mengambil `get_source_outputs()[0]`.
+  Filter yang tampak "lebih benar" itu membuat tenant buta total — ini penyebab
+  merah yang pertama.
+- `get_application_id()` None untuk klien PipeWire; `get_name()` yang berisi nama
+  klien (`pw-cat` untuk pw-record). `_micApp()` mencoba id dulu, jatuh ke name.
+
+### Harga dari melempar di dalam enable()
+
+Lemparan konstruktor di atas terjadi **sebelum `_tick()` dipasang**: island hidup
+separuh, 13 assertion merah, dan tidak ada satu pun pesan error yang menunjuk ke
+mikrofon. Karena itu seluruh `_startMic()` dibungkus try/catch yang hanya mencatat
+`Gvc mati: ...` dan meninggalkan `_mixer = null`. Doktrinnya: satu tenant tidak
+boleh bisa mematikan seluruh island. `disable()` juga `close()` mixer sebelum
+referensinya dibuang — stream adalah objek milik mixer, tanpa itu `_micOn` masih
+bisa dibaca hidup sesudah island mati.
+
+### Edge trigger: dua perekam, satu bangun
+
+`_wake()` hanya dipanggil pada transisi mati→nyala. Terukur di R6: dua `pw-record`
+tumpang tindih → `unhide` = 1 dan `stow` = 0 (`R6-MIC-TIDAK-BERKEDIP`), lalu stream
+terakhir mati → `stow` dalam 10 dtk (`R6-MIC-LEPAS`). Nilai pil disiapkan oleh
+`_syncMic()` dan tidak dipindai saat render, jadi `_render()` tetap murni membaca
+keadaan — tidak ada polling baru untuk fitur yang justru hadir untuk
+menghindarinya.
+
+### Dua pelajaran rig
+
+1. **`sed` multi-line memakan dua putaran tes.** Pola dengan `\n` diterapkan
+   baris-per-baris, sehingga clause privacy diam-diam tidak pernah masuk dan
+   `_privacy()` terpanggil nol kali. Ketahuan baru oleh grep, bukan oleh rig.
+   Edit verbatim multi-baris → pakai Edit, verifikasi dengan grep, jangan dengan
+   menjalankan rig.
+2. **PipeWire itu per-user, bukan per-sesi.** Perekam palsu rig ikut menyalakan
+   privacy dot di desktop nyata selama beberapa detik. Sudah diterima dan ditulis
+   di komentar blok R6, supaya tidak dihabiskan satu sesi untuk "memperbaiki" hal
+   yang memang bukan bug.
+
+## Rig hitam total: shell tidak melukis satu frame pun tanpa damage
 
 Kanvas `:11` terbaca hitam pekat (0 px non-hitam, termasuk strip panel) sementara
 `noir-island: aktif` tercatat, 0 JS ERROR, dan seluruh assertion pixel mati di
