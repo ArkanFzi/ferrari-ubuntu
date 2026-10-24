@@ -255,6 +255,17 @@ echo "SEED-BACA: disable-user-ext=\$(dconf read /org/gnome/shell/disable-user-ex
 # shell di dalam Xephyr tidak pernah melihatnya sama sekali.
 echo "\$DBUS_SESSION_BUS_ADDRESS" > $RIG/bus
 
+# Saluran kontrol. Tulisan dconf dari luar sesi ini TIDAK sampai ke shell, dan
+# itu terukur dua kali: harness menulis show-banners=false, shell menerima sinyal
+# perubahannya tapi tetap membaca true (baris "dnd off" untuk kedua tulisan), dan
+# di sesi uji terisolasi tulisan itu bahkan mendarat di dconf desktop asli
+# (dconf-service di-aktifkan oleh dbus-daemon dengan HOME warisan, bukan HOME
+# klien). Ditulis dari DALAM sesi, service yang dipakai sama dengan yang dipakai
+# shell, dan satu-satunya bukti yang dibaca adalah baris log island sendiri.
+mkfifo $RIG/ctl 2>/dev/null
+exec 8<> $RIG/ctl
+( while read -r PERINTAH <&8; do eval "\$PERINTAH"; done ) &
+
 # stderr shell DIWARISI dari sesi ini (tidak dialihkan ke file kedua): log() GJS
 # keluar di sana, dan dua penulis dengan offset terpisah pada shell.out akan
 # saling menimpa.
@@ -305,10 +316,24 @@ bersih() {
   kill $XP 2>/dev/null
   for p in $(pgrep -f 'gnome-[s]hell --x11' 2>/dev/null); do kill "$p" 2>/dev/null; done
   pkill -x Xephyr 2>/dev/null
+  # run.sh bisa tertahan (wait $GS tidak selalu kembali saat shell-nya dibunuh
+  # dari luar) dan tetap memegang fd 9 = flock-nya, sehingga run berikutnya
+  # langsung ABORT padahal tidak ada rig yang hidup.
+  for p in $(pgrep -f "bash $RIG/run[.]sh" 2>/dev/null); do kill "$p" 2>/dev/null; done
 }
 # Harness HARUS menggerakkan pointer di dalam Xephyr, bukan di sesi nyata user.
 export DISPLAY=$DISPLAY_NO
 sleep 2
+# HOME/HOME-XDG WAJIB sudah benar SEBELUM dbus-daemon lahir, bukan hanya di dalam
+# run.sh: service yang diaktifkan dbus-run-session (ca.desrt.dconf) mewarisi
+# environment DAEMON-nya, bukan environment klien. Tanpa prefix ini dconf-service
+# berjalan dengan HOME=/home/arkan, jadi setiap tulisan settings dari dalam rig
+# mendarat di dconf desktop sungguhan (efek samping yang sudah sempat terjadi),
+# sementara gnome-shell di dalam rig membaca berkas db milik HOME-nya sendiri yang
+# tidak pernah berubah. Hasil terukur: sinyal changed::show-banners tiba, nilainya
+# tetap lama, dan baris 'dnd on' tidak pernah ada.
+HOME=$RIG/home XDG_CONFIG_HOME=$RIG/home/.config XDG_DATA_HOME=$RIG/home/.local/share \
+XDG_CACHE_HOME=$RIG/home/.cache \
 dbus-run-session -- bash "$RIG/run.sh" > "$RIG/shell.out" 2>&1 &
 RB=$!
 
@@ -472,6 +497,47 @@ tidur_island() {
 geo() {
   grep -a 'noir-island: .* [0-9]*x[0-9]* @[-0-9]*,[-0-9]* panel=[0-9]*' "$RIG/shell.out" | tail -1 \
     | sed -n 's/.* \([0-9]*\)x\([0-9]*\) @\(-\?[0-9]*\),\(-\?[0-9]*\) panel=\([0-9]*\).*/\1 \2 \3 \4 \5/p'
+}
+
+# Badge yang benar-benar dilukis, dibaca dari island sendiri: angka di screenshot
+# harus dikenali bentuknya, dan "+3" bisa tertukar dengan judul lagu.
+antre_terakhir() { baris_terakhir | sed -n 's/.*antre=\([0-9]*\).*/\1/p'; }
+titik() { wc -l < "$RIG/shell.out"; }
+# tunggu_log memindai SELURUH berkas, jadi pola yang sudah pernah muncul lolos
+# tanpa ada kejadian baru. Yang dibutuhkan tes badge adalah baris baru.
+tunggu_baru() {
+  for i in $(seq ${3:-30}); do
+    tail -n +$((${2} + 1)) "$RIG/shell.out" | grep -qa "$1" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+# Tulis settings lewat saluran kontrol di dalam sesi rig (lihat run.sh). Nilai
+# balik gsettings tidak bisa dipercaya di lingkungan ini, jadi tiap rigctl
+# disambut tunggu_baru pada baris log island: log itu yang jadi buktinya.
+rigctl() { printf '%s\n' "$*" > "$RIG/ctl"; }
+# Badge yang sedang dilukis, diukur dengan membangunkan pil tanpa mengirim apa
+# pun. Yang dipakai tes adalah SELISIHnya: record yang tidak pernah tampil (DND,
+# aktor dibunuh) tidak pernah terbayar dan tetap ikut menghitung, jadi angka
+# absolut tidak bisa diharapkan sama di dua percobaan.
+badge_diam() {
+  local t=$(titik)
+  xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+  tunggu_baru ' pill ' $t || return 1
+  antre_terakhir
+}
+# notify-send TIDAK memberi id lewat -r: itu REPLACE-id, dan daemon 46 menerima id
+# yang belum pernah ada tanpa membunuh apa pun, jadi CloseNotification di R5C lama
+# menjawab sukses sementara kartunya tetap naik 2,5 dtk kemudian dan membayar
+# tagihannya. -p/--print-id mengembalikan id yang benar-benar diberikan daemon.
+notif_id() {
+  notify-send -p -u "${3:-normal}" -a "${4:-noir-rig}" --expire-time=60000 "$1" "$2" \
+    2>/dev/null | tr -dc '0-9'
+}
+notif_close() {
+  gdbus call --session --dest org.freedesktop.Notifications \
+    --object-path /org/freedesktop/Notifications \
+    --method org.freedesktop.Notifications.CloseNotification "$1" >/dev/null 2>&1
 }
 
 CUT=640; POKOK=32
@@ -653,6 +719,124 @@ else
 fi
 
 kill $PLAYER 2>/dev/null
+
+# --------------- R5 jejak notifikasi: badge dibayar oleh jejak, bukan oleh antrean
+# Tiga hal berbeda, dan hanya R5A yang bukan perbaikan:
+#  R5A burst — 4 pesan: 1 tampil + 3 antre -> badge naik 3. Perilaku lama,
+#              dijaga supaya pemindahan badge ke jejak tidak menggeser angkanya.
+#  R5B DND   — show-banners mati: tidak ada satu pun kartu, tapi dua kedatangan
+#              tetap meninggalkan jejak di pil. Sebelum jejak ini _onNotify
+#              return di depan DND dan pesannya hilang tanpa bekas.
+#  R5C aktor — notifikasi yang sedang antre dibunuh dari luar (CloseNotification).
+#              _pending membuangnya, record-nya tetap tertagih. Kode lama: badge
+#              ikut jatuh padahal pesan itu tidak pernah tampil.
+# Semua dibaca dari antre= pada baris log island; R5B mengonfirmasinya sekali lagi
+# di pixel, karena "badge=2" di log tetap hijau waktu _fillPill lupa melukisnya.
+# Yang diuji SELISIH terhadap badge yang sedang dilukis, bukan angka mutlak:
+# record yang tidak pernah tampil tidak pernah terbayar dan tetap ikut menghitung.
+tidur_island || echo "  (sebelum R5 island belum tidur: $(baris_terakhir))"
+say "R5A burst"
+BAS=$(badge_diam || echo 0)
+A0=$(titik)
+for i in 1 2 3 4; do
+  notify-send -u normal -r 500$i --expire-time=60000 "R5A pesan $i" "burst" 2>/dev/null
+  sleep 0.3
+done
+PUNCAK=$(tail -n +$((A0 + 1)) "$RIG/shell.out" | grep -ao 'antre=[0-9]*' \
+  | sed 's/antre=//' | sort -n | tail -1)
+if [ "$((PUNCAK - BAS))" = "3" ]; then
+  check R5A-BURST OK
+else
+  check R5A-BURST GAGAL "puncak ${PUNCAK:-0} dari baseline $BAS, harusnya +3 (1 tampil + 3 antre)"
+fi
+# Yang antre harus sempat tampil semua supaya tagihannya lunas; tanpa ini R5B dan
+# R5C mengukur di atas sisa tes sebelumnya.
+tunggu_baru "antre=$BAS" $A0 || echo "  (antrean R5A tidak tuntas: $(baris_terakhir))"
+
+# ------------------------------------------------------ R5B DND: dicatat, tak tampil
+tidur_island || echo "  (sebelum R5B island belum tidur: $(baris_terakhir))"
+say "R5B DND"
+BAS_B=$(badge_diam || echo 0)
+read -r SW SH SX SY _ <<<"$(geo)"
+shot "$RIG/shots/r5b-sebelum.png"
+B0=$(titik)
+rigctl gsettings set org.gnome.desktop.notifications show-banners false
+SAMPAI=$(tunggu_baru 'noir-island: dnd on' $B0 && echo ya || echo tidak)
+if [ "$SAMPAI" = "ya" ]; then
+  check R5B-DND-SAMPAI OK
+else
+  check R5B-DND-SAMPAI GAGAL "shell tidak pernah melihat perubahannya (tak ada baris 'dnd on' bahkan lewat saluran kontrol di dalam sesi)"
+fi
+notify-send -u normal -r 5101 --expire-time=60000 "R5B tanpa layar" "dnd" 2>/dev/null
+sleep 0.3
+notify-send -u normal -r 5102 --expire-time=60000 "R5B tanpa layar" "dnd" 2>/dev/null
+sleep 1.0
+KARTU=$(tail -n +$((B0 + 1)) "$RIG/shell.out" | grep -ac 'notif <- ')
+tunggu_baru "antre=$((BAS_B + 2))" $B0 || echo "  (badge tidak naik: $(baris_terakhir))"
+BI=$(antre_terakhir)
+shot "$RIG/shots/r5b-sesudah.png"
+B1=$(titik)
+rigctl gsettings set org.gnome.desktop.notifications show-banners true
+tunggu_baru 'noir-island: dnd off' $B1 \
+  || say "R5B: restore show-banners=true tidak terbaca di log island"
+SA=$(terang "$RIG/shots/r5b-sebelum.png" $((SX + 8)) $((SY + 4)) $((SX + SW - 8)) $((SY + SH - 2)))
+SB=$(terang "$RIG/shots/r5b-sesudah.png" $((SX + 8)) $((SY + 4)) $((SX + SW - 8)) $((SY + SH - 2)))
+say "R5B pixel: $SA -> $SB terang di pil ${SW}x${SH} @${SX},${SY}"
+[ "${KARTU:-0}" = "0" ] && check R5B-DND-TANPA-KARTU OK \
+  || check R5B-DND-TANPA-KARTU GAGAL "$KARTU baris card notif tergambar padahal show-banners mati"
+[ "${BI:-0}" = "$((BAS_B + 2))" ] && check R5B-DND-JEJAK OK \
+  || check R5B-DND-JEJAK GAGAL "badge ${BI:-0} dari baseline $BAS_B, harusnya +2 (dua pesan DND dicatat, judul kembar menyatu)"
+if [ "${BI:-0}" = "$((BAS_B + 2))" ]; then
+  # Ambang 8, bukan 15: badge "+2" TERUKUR menambah 14 px terang di pil 240x34,
+  # dan pil yang angkanya tidak berubah menambah 1 px. Yang diuji adalah "sesuatu
+  # benar-benar digambar", bukan bentuk glyph-nya — bentuk itu urusan R5B-JEJAK.
+  [ "$((SB - SA))" -ge 8 ] && check R5B-DND-TERLIHAT OK \
+    || check R5B-DND-TERLIHAT GAGAL "pil $SA px -> $SB px; badge +2 tidak menambah 8 px pun"
+else
+  # Dilewati, bukan lulus: angka badge-nya saja sudah salah, jadi membandingkan
+  # pixelnya tidak membuktikan apa pun.
+  say "R5B-DND-TERLIHAT: DILEWATI (badge salah, $SA px -> $SB px)"
+fi
+
+# -------------------------------------------- R5C aktor dibunuh saat masih antre
+tidur_island || echo "  (sebelum R5C island belum tidur: $(baris_terakhir))"
+say "R5C aktor mati saat antre"
+BAS_C=$(badge_diam || echo 0)
+parkir
+C0=$(titik)
+HID=$(notif_id "R5C pemegang" "tampil" normal)
+QID=$(notif_id "R5C antrean" "dibunuh" normal)
+say "R5C id: pemegang=${HID:-?} antrean=${QID:-?}"
+tunggu_baru 'notif <- ' $C0 || echo "  (R5C pemegang tidak tampil: $(baris_terakhir))"
+tunggu_baru "antre=$((BAS_C + 1))" $C0 || echo "  (badge tidak naik: $(baris_terakhir))"
+SEBELUMMATI=$(antre_terakhir)
+# Urutan tutup bukan hiasan: yang antre HARUS mati lebih dulu. Kalau pemegang
+# yang ditutup duluan, tick berikutnya menaikkan si antre ke panggung dan
+# record-nya terbayar — persis samar yang mau diukur.
+notif_close "$QID"
+notif_close "$HID"
+# Pemegang sengaja ditutup dari luar, bukan dibiarkan kedaluwarsa sendiri
+# (hold-normal-ms 2500): setelah keduanya mati island tidur, lalu hover melukis
+# pil dan baris itu terjadi SETELAH aktornya mati — angkanya cuma bisa benar
+# kalau badge dibaca dari jejak, bukan dari _pending. Pointer sengaja parkir
+# sejak baca baseline: hover di atas kartu memperpanjang hold sampai ceiling.
+tidur_island || echo "  (sebelum baca R5C island belum tidur: $(baris_terakhir))"
+SESUDAHMATI=$(badge_diam || echo -1)
+# Tidak ada assertion "berapa kartu yang naik": tiap repaint card notifikasi
+# mencetak baris "notif <-" yang sama, jadi jumlahnya bukan bukti siapa yang
+# tampil. Yang membuktikan R5C tidak sempat tampil adalah angkanya sendiri —
+# record-nya terbayar (_surface menurunkan unread) begitu kartunya naik, jadi
+# badge yang tetap +1 berarti tidak ada satu pun kartu untuk si antrean.
+# Tutup yang tidak bekerja juga terbaca di sini: si antre sempat naik, kartunya
+# menahan pil, dan badge_diam mengembalikan -1 karena tak ada baris pill baru.
+if [ "${SEBELUMMATI:-0}" != "$((BAS_C + 1))" ]; then
+  check R5C-AKTOR-MATI GAGAL "badge $SEBELUMMATI dari baseline $BAS_C: si antre tidak pernah tertagih, jadi tidak ada yang diuji"
+elif [ "${SESUDAHMATI:-0}" != "$((BAS_C + 1))" ]; then
+  check R5C-AKTOR-MATI GAGAL "badge $SEBELUMMATI -> ${SESUDAHMATI:-0} dari baseline $BAS_C setelah aktornya dibunuh, harusnya tetap +1"
+else
+  check R5C-AKTOR-MATI OK
+fi
+parkir
 # Hanya error dari jalur noir-island yang dihitung: DING mengeluh soal ~/Desktop
 # yang memang tidak ada di HOME rig, dan itu bukan regresi island.
 JS=$(grep -a "noir-island" "$RIG/shell.out" | grep -ac "JS ERROR\|TypeError\|SyntaxError")

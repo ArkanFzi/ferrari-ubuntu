@@ -97,6 +97,12 @@ const RAIL_MS = 200;
 const TICK_MS = 500;
 const DBUS_TIMEOUT_MS = 400;
 const QUEUE_MAX = 8;
+// Jejak notifikasi. Yang disimpan angka dan string biasa, tanpa referensi objek
+// shell, jadi aktor yang sudah destroy tidak pernah ikut tertahan. TTL dipakai
+// karena satu hal tidak bisa dibedakan dari sini: belum pernah tampil, atau
+// matinya karena kedaluwarsa di tray.
+const LOG_MAX = 20;
+const LOG_TTL_MS = 5 * 60 * 1000;
 // Pemain yang lahir tanpa metadata ditanya ulang tiap scan (2 dtk), tapi cuma
 // sampai ambang ini: nama MPRIS yang memang bukan player jangan dipoll seumur
 // hidup.
@@ -149,6 +155,7 @@ export class Island {
     this._dead = false;
     this._players = new Map();
     this._pending = [];
+    this._log = [];
     this._showing = null;
     this._watched = new Map();
     this._hooked = new Map();
@@ -219,6 +226,10 @@ export class Island {
     this._on(Main.layoutManager, 'monitors-changed', () => this._relayout());
     this._on(Main.panel, 'notify::height', () => this._relayout());
     this._on(this._notifSettings, 'changed::show-banners', () => {
+      // Dicetak di sini supaya rig bisa membedakan "DND tidak dicatat" dari
+      // "perubahannya tidak pernah sampai ke shell" — keduanya terbaca sama di
+      // layar, dan yang kedua bukan bug island.
+      log(`noir-island: dnd ${this._dndOff() ? 'on' : 'off'}`);
       if (this._dndOff())
         this._showing = null;
       this._render();
@@ -287,6 +298,7 @@ export class Island {
     this._hooked.clear();
 
     this._pending = [];
+    this._log = [];
     this._showing = null;
 
     for (const e of this._players.values())
@@ -1126,12 +1138,14 @@ export class Island {
   }
 
   // Ringkasan isi yang akan tampil. Yang TIDAK ikut: posisi progres dan label
-  // waktu (disuapi _tick() langsung, tanpa lewat render) dan geometri monitor
-  // (dibersihkan lewat _relayout). Jam masuk sebagai menit, bukan detik.
+  // waktu (disuapi _tick() langsung, tanpa lewat render), geometri monitor
+  // (dibersihkan lewat _relayout), dan badge antrean (hanya angka di sudut, bukan
+  // pengumuman — lihat kunci lukisan di _render). Jam masuk sebagai menit,
+  // bukan detik.
   _signature(player, state) {
     if (state === 'notif') {
       const {src, n} = this._showing;
-      return `notif|${src?.title ?? ''}|${n.title}|${n.body}|${n.urgency}|${this._pending.length}`;
+      return `notif|${src?.title ?? ''}|${n.title}|${n.body}|${n.urgency}`;
     }
     if (state === 'media') {
       const m = player.meta;
@@ -1142,7 +1156,7 @@ export class Island {
     this._ambientId = p?.id ?? '-';
     const resting = player?.meta?.title ? player : null;
     return `idle|${this._ambientId}|${p ? p.nilai() : ''}`
-      + `|${resting ? resting.meta.title : ''}|${this._pending.length}`;
+      + `|${resting ? resting.meta.title : ''}`;
   }
 
   _render() {
@@ -1198,9 +1212,16 @@ export class Island {
 
     // Jam menit masuk ke kunci lukisan pill, bukan ke signature isi: pill harus
     // mengganti angkanya sekali semenet, tapi card media tidak boleh tergambar
-    // ulang karena jam.
+    // ulang karena jam. Badge masuk ke kunci yang sama, bukan ke signature:
+    // antrean yang berubah bukan pengumuman baru, ia hanya angka di sudut pil —
+    // di signature dia akan ikut memperpanjang peek dan membangunkan island.
     const jam = GLib.DateTime.new_now_local().format('%H:%M');
-    const kunci = level === 'card' ? `${isi}|${level}` : `${isi}|${level}|${jam}`;
+    const badge = this._unread();
+    // Card media tidak memuat badge, jadi angkanya tidak boleh menggambarnya
+    // ulang; pill, peek dan card notif selalu memuat.
+    const kunci = level === 'card'
+      ? content === 'notif' ? `${isi}|${level}|${badge}` : `${isi}|${level}`
+      : `${isi}|${level}|${jam}|${badge}`;
 
     // Isi yang tidak berubah tidak digambar ulang. Tiap set_text memicu request
     // layout pada card yang sedang di-morph, dan render ulang tanpa perubahan
@@ -1216,11 +1237,11 @@ export class Island {
     this._notifRow.visible = card && content === 'notif';
 
     if (card && content === 'notif')
-      this._fillNotif();
+      this._fillNotif(badge);
     else if (card)
       this._fillMedia(player);
     else
-      this._fillPill(player, content, jam);
+      this._fillPill(player, content, jam, badge);
 
     // Morph hanya kalau bentuk benar-benar berganti (atau island baru bangun).
     // Ganti trek di dalam level yang sama menurunkan opacity/isi, bukan ukuran.
@@ -1233,13 +1254,14 @@ export class Island {
     // bisa dibuktikan dari screenshot (pil kosong dan pil mati terlihat sama),
     // dan rig membacanya dari sini.
     const amb = content === 'idle' ? ` ambient=${this._ambientId ?? '-'}` : '';
-    log(`noir-island: ${asal ? `${content} <- ${asal}` : content} ${level} ${this._geo}${amb}`);
+    log(`noir-island: ${asal ? `${content} <- ${asal}` : content} ${level} ${this._geo}${amb}`
+      + ` antre=${badge}`);
     this._state = content;
     this._level = level;
     this._shape = bentuk;
   }
 
-  _fillPill(player, content, jam) {
+  _fillPill(player, content, jam, badge) {
     // Pill media selalu membawa jam di slot kicker: di level pill angka itu cuma
     // pengiring, di peek/card dialah pengganti jam panel — island tidak boleh
     // memakan jam lalu menggantinya dengan judul lagu. Slot ambient berbeda: di
@@ -1255,9 +1277,8 @@ export class Island {
     }
     // Antrean tetap terlihat saat island diam: notifikasi yang tertahan
     // (fullscreen / DND) tidak boleh hilang tanpa jejak.
-    const queued = this._pending.length;
-    this._pillBadge.visible = queued > 0;
-    this._pillBadge.set_text(queued > 0 ? `+${queued}` : '');
+    this._pillBadge.visible = badge > 0;
+    this._pillBadge.set_text(badge > 0 ? `+${badge}` : '');
   }
 
   _fillMedia(player) {
@@ -1325,7 +1346,7 @@ export class Island {
     });
   }
 
-  _fillNotif() {
+  _fillNotif(badge) {
     const {src, n} = this._showing;
     const critical = n.urgency >= Urgency.CRITICAL;
     this._nKicker.set_text(String(src.title || 'Notifikasi').toUpperCase());
@@ -1337,9 +1358,8 @@ export class Island {
       this._nKicker.remove_style_class_name('noir-island-kicker--hot');
     this._nTitle.set_text(n.title || '');
     this._nBody.set_text(this._oneLine(n.body || '', BODY_MAX));
-    const queued = this._pending.length;
-    this._badge.visible = queued > 0;
-    this._badge.set_text(queued > 0 ? `+${queued}` : '');
+    this._badge.visible = badge > 0;
+    this._badge.set_text(badge > 0 ? `+${badge}` : '');
     this._iconBin.set_child(this._notifIcon(src));
     this._fillActions(n);
     // Rel rosso adalah gestur masuknya kartu: dialirkan dari tepi atas ke bawah
@@ -1828,6 +1848,38 @@ export class Island {
       this._fillActions(n);
   }
 
+  // Satu titik catat: _onNotify, sebelum DND berhak menolak menampilkan. Pesan
+  // kembar dari aplikasi yang sama menyatu di kepala karena daftar tersortir
+  // terbaru-di-depan, dan `unread`-nya dihitung per kedatangan — bukan per
+  // record — supaya tiga pesan sama yang satu di antaranya sempat tampil masih
+  // menyisakan dua di badge.
+  _catat(src, n) {
+    const app = String(src?.title ?? '');
+    const judul = String(n.title ?? '');
+    const sekarang = monoMs();
+    let rec = this._log[0];
+    if (!rec || rec.app !== app || rec.title !== judul) {
+      rec = {app, title: judul, at: sekarang, unread: 0};
+      this._log.unshift(rec);
+      while (this._log.length > LOG_MAX)
+        this._log.pop();
+    }
+    rec.at = sekarang;
+    rec.unread++;
+    return rec;
+  }
+
+  _unread() {
+    const batas = monoMs() - LOG_TTL_MS;
+    let banyak = 0;
+    for (const r of this._log) {
+      if (r.at < batas)
+        break;
+      banyak += r.unread;
+    }
+    return banyak;
+  }
+
   // Antrean selalu tersortir urgensi turun, dan sisipnya memakai "<" ketat
   // sehingga sesama urgensi tetap FIFO. `_surface()` tinggal mengambil kepala;
   // kalau tidak tersortir, critical yang baru masuk harus menunggu satu hold
@@ -1845,13 +1897,17 @@ export class Island {
     this._hook(n);
     if (this._showing?.n === n || this._pending.some(x => x.n === n))
       return;
+    // Dicatat sebelum DND menolak: jejak tinggal di badge meski island tidak
+    // pernah menampilkan, dan menyalakan DND tidak boleh membuat pesan hilang
+    // tanpa bekas.
+    const rec = this._catat(src, n);
     if (this._dndOff())
       return;
 
     // Island yang sedang tidur dibangunkan oleh notifikasi baru, sama seperti
     // pointer yang datang dekat panel.
     this._wake();
-    this._enqueue({src, n});
+    this._enqueue({src, n, rec});
 
     // Yang lebih urgent menyingkirkan yang sedang tampil; yang lama masuk
     // kembali lewat sisip yang sama, jadi ia tidak hilang dan tidak ikut
@@ -1859,7 +1915,7 @@ export class Island {
     if (this._showing && n.urgency > this._showing.n.urgency) {
       const lama = this._showing;
       this._showing = null;
-      this._enqueue({src: lama.src, n: lama.n});
+      this._enqueue({src: lama.src, n: lama.n, rec: lama.rec});
     }
     if (!this._showing)
       this._surface();
@@ -1881,6 +1937,11 @@ export class Island {
       return;
     const item = this._pending.shift();
     const urgency = item.n.urgency;
+    // Tampil = terbayar: record-nya kehilangan satu tagihan badge. Yang tidak
+    // pernah sampai ke baris ini (DND membuang antrean, aktornya mati duluan)
+    // tetap tertagih, dan itu justru isi badge.
+    if (item.rec && item.rec.unread > 0)
+      item.rec.unread--;
     // Critical tidak kedaluwarsa menurut freedesktop, tapi tanpa batas island
     // jadi sandera satu kartu: media dan notif berikutnya tidak pernah tampil
     // lagi dan tidak ada satu pun log baru. Batas panjang tapi nyata.
@@ -1890,6 +1951,7 @@ export class Island {
     this._showing = {
       src: item.src,
       n: item.n,
+      rec: item.rec,
       until: sekarang + hold,
       // Atap untuk perpanjangan saat pointer di atas kartu. Tanpa atap, pointer
       // yang ditinggal duduk di atas island mengunci satu kartu selamanya.

@@ -819,7 +819,83 @@ benchmark: closed state boring.notch adalah `Rectangle().fill(.clear)` dan
 Dynamic Island tidak menampilkan konten ambient sama sekali. Kalau nanti ambient
 harus selalu terlihat, itu keputusan `_hasContent()` — bukan `_providers()`.
 
-## Rig hitam total: shell tidak melukis satu frame pun tanpa damage
+## TIER 30 — jejak notifikasi: badge dibayar oleh kedatangan, bukan oleh antrean
+
+Premis yang dipakai untuk membuka tahap ini salah, dan dibuang lebih dulu sebelum
+satu baris pun ditulis: riset menyebut gnome-shell 46 memotong banner **per
+sumber di 3** sehingga pesan ke-4 dan ke-5 hilang sebelum sempat ditampilkan.
+Diukur dengan lima `notify-send` dari satu sumber ke rig: `antre` naik 1 → 2 → 4
+dan semuanya tetap masuk antrean island. Tidak ada plafon di jalur ini. Yang
+tersisa adalah dua jalan masuk yang **benar-benar** menghilangkan pesan tanpa
+jejak, dan keduanya di dalam kode sendiri:
+
+- `_onNotify` kembali (`return`) di depan `_dndOff()` sebelum `_enqueue` — selama
+  DND aktif tidak ada satu pun pesan yang dicatat, dan pengguna tidak punya cara
+  untuk tahu ada apa saja yang lewat.
+- Handler `destroy` pada aktor membuang item dari `_pending` (island.js:1832).
+  Notifikasi yang mati di tray — ditutup aplikasi, kedaluwarsa, atau sumbernya
+  lenyap — hilang dari antrean tanpa pernah tampil satu pixel pun.
+
+### Bentuk jejaknya
+
+`_log` adalah array angka dan string biasa — `{app, title, at, unread}` — tanpa
+referensi objek shell, jadi tidak ada aktor yang tertahan oleh kita. Satu titik
+tulis (`_catat`, dipanggil di `_onNotify` **sebelum** DND berhak menolak), satu
+titik bayar (`_surface`, menurunkan `unread` saat kartunya naik). Pesan kembar dari
+aplikasi dan judul yang sama menyatu di kepala dan hanya menaikkan hitungan, sesuai
+kebiasaan tray. `LOG_MAX = 20` dan `LOG_TTL_MS = 5 menit`; TTL dipakai karena satu
+hal tidak bisa dibedakan dari sini: belum pernah tampil, atau matinya karena
+kedaluwarsa di tray.
+
+Badge = `_unread()` = jumlah `unread` di dalam jendela TTL. Karena badge bukan lagi
+cerminan `_pending`, `_pending.length` **dikeluarkan dari `_signature()`** — itu
+bug yang selama ini tersembunyi: setiap kali satu pesan bergeser dari antrean ke
+kartu, signature berubah, `_peekUntil` dipersenjatai ulang dan `_wake()` terpanggil,
+jadi island berkedip karena fluktuasi daftar yang tidak pernah dilihat siapa pun.
+Yang tetap menggambarnya ulang cuma jam (`kunci` pill/peek) dan badge, dan card
+media secara sadar tidak memuat badge.
+
+Yang bisa dibuktikan dari layar sekarang: `antre=N` dicetak di baris log island
+sendiri, jadi angka badge punya saluran observasi sebelum pixel sempat dipercaya.
+
+### Rig: tiga jebakan yang harus dibayar untuk membuktikannya
+
+**Tulisan settings dari luar sesi rig tidak pernah sampai ke shell, dan causes
+damage.** `dbus-run-session` mengaktifkan `ca.desrt.dconf` dengan HOME **milik
+dbus-daemon**, bukan milik klien. Sesi rig lahir dari `dbus-run-session -- bash
+run.sh` tanpa prefix HOME, jadi dconf-service berjalan dengan `HOME=/home/arkan`:
+setiap tulisan dari dalam rig mendarat di `~/.config/dconf/user` desktop asli
+(efek samping yang sempat terjadi dan sudah dikembalikan), sementara gnome-shell di
+dalam rig membaca db milik HOME-nya sendiri. Yang terukur di layar: sinyal
+`changed::show-banners` **tiba** tapi `get_boolean` masih menjawab nilai lama —
+dua baris `noir-island: dnd off` untuk dua tulisan yang seharusnya `false` lalu
+`true`. Perbaikannya satu baris: prefix `HOME=`/`XDG_*=$RIG/home` pada launcher
+sesi (persis pola yang selama ini sudah dipakai tahap seed). Bukti satu-satunya
+yang diterima tes kemudian adalah baris log island sendiri, bukan `gsettings get`.
+
+**`-r` bukan gagang untuk menutup.** `notify-send -r 5302` adalah *replace-id*;
+daemon 46 menerima id yang belum pernah ada tanpa menolak apa pun, jadi
+`CloseNotification 5302` menjawab sukses sementara kartunya tetap naik 2,5 dtk
+kemudian, tampil, dan membayar tagihannya — R5C lama gagal karena alasan itu, bukan
+karena badge-nya salah. `-p/--print-id` mengembalikan id yang benar-benar diberikan
+daemon (terukur: `pemegang=8 antrean=9`).
+
+**Urutan tutup adalah bagian dari tes.** Aktor yang antre harus mati lebih dulu;
+kalau pemegang yang ditutup duluan, tick berikutnya menaikkan si antre ke panggung
+dan jejaknya terbayar — persis samar yang mau diukur.
+
+### Angka ambang yang sekarang punya dasar
+
+Pil 240x34 di `@726,32`: badge `+2` menambah **14 px** terang, dan pil yang
+angkanya tidak berubah menambah **1 px**. Ambang `R5B-DND-TERLIHAT` sempat dipatok
+15 dan gagal karena satu pixel — patokan sekarang 8, dan yang diuji tetap
+"sesuatu benar-benar digambar", bukan bentuk glyph (bentuk itu urusan R5B-JEJAK).
+R5A menjaga agar memindahkan badge ke jejak tidak menggeser semantics lama: empat
+pesan dari satu sumber = satu tampil + tiga antre = puncak `+3`, lalu antrean harus
+terlihat tuntas kembali ke baseline supaya R5B dan R5C tidak mengukur di atas sisa
+tes sebelumnya — karena record yang tidak pernah tampil **memang** tidak pernah
+terbayar, semua assertion badge dipakai sebagai **selisih**, bukan angka mutlak.
+
 
 Kanvas `:11` terbaca hitam pekat (0 px non-hitam, termasuk strip panel) sementara
 `noir-island: aktif` tercatat, 0 JS ERROR, dan seluruh assertion pixel mati di
