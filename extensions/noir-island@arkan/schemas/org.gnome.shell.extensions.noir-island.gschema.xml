@@ -84,5 +84,15 @@
         merekam" — dot privacy di kanan atas sudah bilang begitu — tapi aplikasi
         mana. Mati = pil tidak pernah bicara soal mikrofon.</description>
     </key>
+    <key name="ambient-agenda" type="b">
+      <default>true</default>
+      <summary>Agenda terdekat boleh mengisi slot ambient</summary>
+      <description>Pil menampilkan acara pertama yang belum lewat dari kalender
+        Evolution Data Server, misalnya "14:30 Rapat" atau "BSK 07:00 Senam".
+        Berbeda dengan mikrofon, agenda tidak pernah membangunkan island: dia
+        hanya bicara saat pil sudah bangun karena pointer, notifikasi, atau trek.
+        Kalender kosong = tidak ada yang dikatakan. Mati = pil diam soal
+        agenda.</description>
+    </key>
   </schema>
 </schemalist>

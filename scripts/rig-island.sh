@@ -58,6 +58,55 @@ cp "$REPO/schemas/org.gnome.shell.extensions.noir-island.gschema.xml" \
 glib-compile-schemas "$RIG/home/.local/share/glib-2.0/schemas"
 node --check "$BUILD/island.js" || { echo "SINTAKS GAGAL"; exit 1; }
 
+# ---- kalender EDS tiruan ----------------------------------------------------
+# Rig TIDAK boleh membaca kalender desktop asli: datanya milik user, isinya
+# berubah kalau user menambah acara, dan nol acara hari ini (terukur:
+# calendar.ics desktop berisi 0 VEVENT) bikin assertion agenda mati tanpa
+# sebab. HOME rig sudah dihapus tiap putaran, jadi tanamannya ikut bersih.
+#
+# Urutan di file sengaja dibalik dari urutan waktu: acara yang sudah lewat
+# ditulis lebih dulu, lalu besok, lalu yang terdekat. Kalau island mengambil
+# baris pertama, bukan acara pertama yang belum lewat, teks pilnya terbaca
+# salah dan assertionnya menangkap itu.
+mkdir -p "$RIG/home/.config/evolution/sources" \
+  "$RIG/home/.local/share/evolution/calendar/system"
+cat > "$RIG/home/.config/evolution/sources/system-calendar.source" <<'SRC'
+[Data Source]
+DisplayName=Personal
+Enabled=true
+Parent=local-stub
+
+[Calendar]
+BackendName=local
+Color=#62a0ea
+Selected=true
+Order=0
+
+[Offline]
+StaySynchronized=true
+
+[Refresh]
+Enabled=true
+EnabledOnMeteredNetwork=true
+IntervalMinutes=30
+SRC
+LEWAT=$(date -u -d '2 hours ago' +%Y%m%dT%H%M00Z)
+LEWAT_A=$(date -u -d '1 hour ago' +%Y%m%dT%H%M00Z)
+RAPAT=$(date -u -d '+3 hours' +%Y%m%dT%H%M00Z)
+RAPAT_A=$(date -u -d '+4 hours' +%Y%m%dT%H%M00Z)
+BESOK=$(date -u -d 'tomorrow 07:00' +%Y%m%dT%H%M00Z)
+BESOK_A=$(date -u -d 'tomorrow 08:00' +%Y%m%dT%H%M00Z)
+STAMP=$(date -u +%Y%m%dT%H%M00Z)
+{
+  printf 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//noir-rig//id\n'
+  printf 'BEGIN:VEVENT\nUID:rig-lewat@noir\nDTSTAMP:%s\nDTSTART:%s\nDTEND:%s\nSUMMARY:Sudah lewat\nEND:VEVENT\n' "$STAMP" "$LEWAT" "$LEWAT_A"
+  printf 'BEGIN:VEVENT\nUID:rig-besok@noir\nDTSTAMP:%s\nDTSTART:%s\nDTEND:%s\nSUMMARY:Kelas besok\nEND:VEVENT\n' "$STAMP" "$BESOK" "$BESOK_A"
+  printf 'BEGIN:VEVENT\nUID:rig-rapat@noir\nDTSTAMP:%s\nDTSTART:%s\nDTEND:%s\nSUMMARY:Rapat R7\nEND:VEVENT\n' "$STAMP" "$RAPAT" "$RAPAT_A"
+  printf 'END:VCALENDAR\n'
+} > "$RIG/home/.local/share/evolution/calendar/system/calendar.ics"
+R7_JAM=$(date -d '+3 hours' +%H:%M)
+echo "R7-TEKS: $R7_JAM Rapat R7"
+
 # ---- penyedia MPRIS palsu ----------------------------------------------------
 # mpv di mesin ini TIDAK punya dukungan MPRIS sama sekali (strings pada biner
 # /usr/bin/mpv tidak memuat satu pun simbol "mpris"; ListNames di bus bersih tidak
@@ -218,6 +267,10 @@ gsettings set org.gnome.shell.extensions.noir-island idle-hide-ms 6000
 gsettings set org.gnome.shell.extensions.noir-island persistent-pill true
 gsettings set org.gnome.shell.extensions.noir-island hold-normal-ms 2500
 gsettings set org.gnome.shell.extensions.noir-island peek-ms 1500
+# Agenda DIMATIKAN di seed walau kalender rig sudah berisi tiga acara: R2C
+# menguji pil idle yang memang kosong, dan itu tetap berarti selama provider
+# lain punya data tapi sakelarnya mati. R7 yang menyalakannya lewat rigctl.
+gsettings set org.gnome.shell.extensions.noir-island ambient-agenda false
 # AMBIEN=1 menyalakan provider jam. Rig harus bisa membuktikan kedua sisi
 # sakelar, bukan hanya sisi mati: tanpa ini "ambient=clock" cuma klaim di log.
 echo "AMBIEN=${AMBIEN:-0}"
@@ -891,6 +944,139 @@ else
   check R6-MIC-SAKELAR OK
 fi
 rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-mic true
+
+# ---------------------------------------------- R7 tenant agenda lewat CalendarServer
+# Sakelar agenda dinyalakan di sini, bukan di seed. Kalender rig sudah berisi
+# tiga acara sejak shell naik, jadi R2C (pil idle harus kosong) otomatis menguji
+# sisi yang lebih sulit: provider PUNYA data, sakelarnya mati.
+say "R7 agenda tenant"
+A0=$(titik)
+rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-agenda true
+sleep 1.0
+xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+if tunggu_baru 'ambient=agenda' $A0 16; then
+  BARIS=$(grep -a "noir-island: idle pill" "$RIG/shell.out" | tail -1)
+  # Yang diuji adalah PEMILIHAN, bukan hanya pengiriman: tiga acara ditanam
+  # dalam urutan acak dan satu sudah lewat, jadi teks yang benar ("Rapat R7",
+  # jam +3 jam) hanya keluar kalau acara terdekat-yang-belum-lewat yang diambil.
+  case "$BARIS" in
+    *"$R7_JAM Rapat R7"*) check R7-AGENDA-TEKS OK ;;
+    *) check R7-AGENDA-TEKS GAGAL "bukan acara terdekat: $BARIS" ;;
+  esac
+  shot "$RIG/shots/agenda.png"
+  read -r PW PH PX PY _ <<<"$(geo)"
+  AC=$(terang "$RIG/shots/agenda.png" $((PX + 8)) $((PY + 4)) $((PX + PW - 8)) $((PY + PH - 2)))
+  if [ "${AC:-0}" -ge 40 ]; then
+    check R7-AGENDA-TERANG OK
+  else
+    check R7-AGENDA-TERANG GAGAL "pil agenda hanya ${AC:-0} px terang di ${PX},${PY} ${PW}x${PH}"
+  fi
+else
+  check R7-AGENDA-TEKS GAGAL "tak ada ambient=agenda setelah hover; kalender rig berisi 3 acara; $(baris_terakhir)"
+  check R7-AGENDA-TERANG GAGAL "ikut mati bersama R7-AGENDA-TEKS"
+fi
+
+# kalender mana yang lebih dulu — yang lebih DEKAT.
+#
+# Sumber kedua ditambahkan SELAGI sesi berjalan dan itu satu-satunya jalur push
+# yang terbukti hidup: mengubah calendar.ics dari luar TIDAK pernah dibaca ulang
+# oleh factory (terukur: 30 dtk menunggu = nol sinyal, force_reload=true pun
+# hanya mengirim acara lama), sedangkan menaruh satu file .source baru memicu
+# EventsAddedOrUpdated dengan prefiks uid sumber baru dalam hitungan detik.
+parkir
+tidur_island || echo "  (sebelum R7B island belum tidur: $(baris_terakhir))"
+SRC2="$RIG/home/.config/evolution/sources/kedua.source"
+ICS2="$RIG/home/.local/share/evolution/calendar/kedua/calendar.ics"
+mkdir -p "$(dirname "$ICS2")"
+cat > "$SRC2" <<SRC
+[Data Source]
+DisplayName=Kedua
+Enabled=true
+Parent=local-stub
+
+[Calendar]
+BackendName=local
+Color=#e01b24
+Selected=true
+Order=1
+SRC
+python3 - "$ICS2" <<'PY'
+import sys, datetime
+f = sys.argv[1]
+utc = datetime.timezone.utc
+cap = datetime.datetime.now(utc).strftime('%Y%m%dT%H%M%SZ')
+def jam(d):
+    return (datetime.datetime.now(utc) + datetime.timedelta(hours=d)).strftime('%Y%m%dT%H%M%SZ')
+s = ("BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//noir-rig//id\n"
+     f"BEGIN:VEVENT\nUID:rig-r7b@noir\nDTSTAMP:{cap}\nDTSTART:{jam(1)}\n"
+     f"DTEND:{jam(2)}\nSUMMARY:Rapat R7B\nEND:VEVENT\nEND:VCALENDAR\n")
+open(f, 'w').write(s)
+PY
+R7B=$(titik)
+R7B_JAM=$(date -d '+1 hour' +%H:%M)
+# Delapan detik tanpa satu pun gerakan pointer: waktu bagi registry melihat
+# file baru, factory membukanya, dan server mengirimnya ke island.
+sleep 8.0
+UNH=$(tail -n +$((R7B + 1)) "$RIG/shell.out" | grep -ac 'noir-island: unhide')
+if [ "$UNH" = "0" ]; then
+  check R7B-TIDAK-BANGUN OK
+else
+  check R7B-TIDAK-BANGUN GAGAL "$UNH unhide karena kalender baru, harusnya 0"
+fi
+# Sekarang baru boleh bangun, dan itu pun oleh pointer rig sendiri.
+KETEMU=0
+for i in $(seq 10); do
+  T0=$(titik)
+  xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+  tunggu_baru ' idle pill ' $T0 8 || true
+  case "$(baris_terakhir)" in
+    *"$R7B_JAM Rapat R7B"*) KETEMU=1; break ;;
+  esac
+  parkir; sleep 0.7
+done
+if [ "$KETEMU" = "1" ]; then
+  check R7B-DATA OK
+else
+  check R7B-DATA GAGAL "kalender kedua tidak pernah sampai (~$((i * 6)) dtk): $(baris_terakhir)"
+fi
+
+# Sumber kedua dicabut. Yang diuji adalah pembersihannya: id event dari server
+# adalah `uid_sumber\nuid_event\n`, jadi hilangnya satu sumber harus membuang
+# SELURUH acaranya sekaligus dan pil harus jatuh kembali ke acara kalender pertama.
+rm -f "$SRC2"
+D0=$(titik)
+KEMBALI=0
+for i in $(seq 8); do
+  T0=$(titik)
+  xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+  tunggu_baru ' idle pill ' $T0 8 || true
+  case "$(baris_terakhir)" in
+    *"$R7_JAM Rapat R7 "*) KEMBALI=1; break ;;
+  esac
+  parkir; sleep 0.7
+done
+if [ "$KEMBALI" = "1" ]; then
+  check R7C-SUMBER-LEPAS OK
+else
+  check R7C-SUMBER-LEPAS GAGAL "sumber kedua dihapus tapi pil tidak kembali ke '$R7_JAM Rapat R7': $(baris_terakhir)"
+fi
+
+parkir
+tidur_island || echo "  (sebelum R7C island belum tidur: $(baris_terakhir))"
+C1=$(titik)
+rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-agenda false
+sleep 1.0
+xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+if tunggu_baru ' idle pill ' $C1 16; then
+  BARIS=$(baris_terakhir)
+  case "$BARIS" in
+    *ambient=agenda*) check R7D-SAKELAR GAGAL "ambient-agenda=false masih melukis agenda: $BARIS" ;;
+    *) check R7D-SAKELAR OK ;;
+  esac
+else
+  check R7D-SAKELAR GAGAL "tidak ada baris idle pill untuk diperiksa: $(baris_terakhir)"
+fi
+
 # Hanya error dari jalur noir-island yang dihitung: DING mengeluh soal ~/Desktop
 # yang memang tidak ada di HOME rig, dan itu bukan regresi island.
 JS=$(grep -a "noir-island" "$RIG/shell.out" | grep -ac "JS ERROR\|TypeError\|SyntaxError")

@@ -961,6 +961,98 @@ menghindarinya.
    di komentar blok R6, supaya tidak dihabiskan satu sesi untuk "memperbaiki" hal
    yang memang bukan bug.
 
+## TIER 32 — tenant agenda: satu-satunya jalan masuk EDS, dan muatannya kecil
+
+Tahap 4 blueprint berbunyi "agenda". Yang ternyata menentukan desain bukan
+permukaan kartunya, tapi **apa yang boleh sampai ke island**. Semuanya diukur di
+HOME terisolasi (`/tmp/eds-spike`) dengan kalender tiruan, bukan di desktop:
+kalender desktop sendiri berisi **0 VEVENT**, jadi fitur ini tidak bisa
+dibuktikan di sesi normal.
+
+### Jalurnya satu, dan bukan pustaka
+
+Ubuntu 24.04 tidak memasang typelib `Gcal` maupun `ECal` — `girepository-1.0`
+hanya berisi `Gvc-1.0`, `Shell-14`, `St-14`. Membaca libecal langsung dari
+extension karena itu mustahil. Satu-satunya pintu adalah
+`org.gnome.Shell.CalendarServer` (`/usr/libexec/gnome-shell-calendar-server`,
+proses terpisah dari shell, di-aktif-on-demand) — persis yang dipakai menu
+tanggal shell sendiri, jadi island tidak menambah beban pustaka kalender apa pun.
+
+### Muatannya empat kolom, dan kolom kelima selalu kosong
+
+Payload terukur:
+
+```
+('system-calendar\nspike-timed-1@noir\n', 'Rapat spike terjadwal', 1792866540, 1792870140, {})
+```
+
+- `id` = `uid_sumber\nuid_event\n`. Prefiks itu bukan hiasan: menu tanggal shell
+  membersihkan satu kalender sekaligus dengan memotong prefiks, dan island
+  melakukan hal yang sama (`_dropAgenda`). Rig membuktikannya dari dua arah:
+  kalender kedua yang ditambah lalu **dihapus** harus membuat pil jatuh kembali
+  ke acara kalender pertama (`R7C-SUMBER-LEPAS`).
+- `additional` **tetap `{}`** walau VEVENT-nya diisi `LOCATION`, `CATEGORIES`,
+  `DESCRIPTION`, `STATUS`, `TRANSP`, bahkan `VALARM`. Jadi tidak ada lokasi,
+  tidak ada warna, tidak ada flag all-day, tidak ada alarm. Yang bisa ditampilkan
+  hanyalah jam dan ringkasan — dan itu membatasi desain card lebih efektif dari
+  pada satu baris larangan di dokumen.
+- All-day disimpulkan, bukan dibaca: `VALUE=DATE 20261025` datang sebagai
+  1792861200 = **00:00 WIB**, bukan 00:00 UTC. Selisih hari dihitung dari tengah
+  malam lokal, dan `BSK` lahir dari situ.
+- Aturan pemilihannya satu baris: acara pertama yang `akhir > now`. Acara yang
+  sudah lewat adalah noise, acara yang sedang berlangsung masih layak dibaca.
+  Rig menanam tiga acara dalam urutan acak (lewat, besok, terdekat) supaya
+  "yang pertama di file" dan "yang paling dekat" terbaca berbeda.
+
+### SetTimeRange adalah state bersama — maka kebijakannya sekali
+
+Terukur dengan dua koneksi D-Bus terpisah: klien A memasang rentang lebar,
+klien B memasang sempit, dan properti yang dibaca **A** berubah milik B.
+Sinyalnya sendiri broadcast — reload dari A justru diterima kedua klien. Dua
+konsekuensi, dan keduanya jadi aturan:
+
+- **Melebar sekali, tidak pernah menyempitkan, tidak pernah mengulang**
+  (`CAL_BEHIND_S` + `CAL_AHEAD_S = 35 hari`). Menyempitkan = menghapus acara dari
+  kalender orang lain.
+- Island boleh **menumpang** kiriman shell tanpa memanggil apa pun, karena
+  broadcast. `force_reload=true` pada panggilan kita juga yang membuat isi
+  yang sudah ada di server langsung terpakai.
+
+### Yang tidak pernah datang sendiri
+
+`calendar.ics` yang diubah dari luar **tidak dibaca ulang** oleh factory: 30 dtk
+menunggu = nol sinyal, dan `SetTimeRange(force_reload=true)` sesudahnya tetap
+hanya mengirim acara lama. Yang terbukti memicu push adalah **sumber** baru:
+satu file `.source` di `~/.config/evolution/sources` cukup untuk membuat
+registry membuka kalender baru dan mengirim isinya dalam hitungan detik. Untuk
+rig itu jalur yang murah dan sah; untuk desktop artinya catatan jujur: orang
+yang mengedit `.ics` dengan tangan harus menunggu refresh EDS sendiri
+(`IntervalMinutes=30`), dan island tidak bisa memperbaikinya dari sisi kita —
+kita sudah berjanji tidak poke berulang.
+
+### Dua hal yang mengulangi pelajaran lama
+
+- `HasCalendars` dimulai `false` dan baru jadi `true` sesudah registry sempat
+  memindai. Persis `open()` pada Gvc: nilai pertama bukan jawaban.
+- `params.unpack()` di GJS 1.80 mengembalikan **Variant bersarang**, jadi
+  `isi[0]` bukan array dan loop-nya melempar `TypeError: isi[0] is not iterable`
+  di jalur sinyal. `deep_unpack()` yang memberi array biasa. Merah pertama rig
+  datang dari sini, dan R7B lolos karena sebab yang salah sebelum itu ketahuan.
+- Dan untuk keempat kalinya di proyek ini: `export HOME` **di dalam** skrip tidak
+  melayani service yang di-aktivasi `dbus-run-session`. Factory tetap membaca
+  kalender desktop yang kosong dan kesimpulannya jadi salah tiga putaran.
+  HOME/XDG harus di-export sebelum `dbus-run-session`, sama seperti dconf di
+  Tahap 2.
+
+### Yang sengaja tidak diubah
+
+Agenda **tidak** membangunkan island dan **tidak** menahan tidurnya — doktrin
+TIER 29 berlaku penuh, dan rig menjaganya dari dua sisi: `R7B-TIDAK-BANGUN`
+(nol `unhide` selama kalender baru dikirim, pointer diparkir) dan R2C yang tetap
+menuntut pil idle kosong saat sakelarnya mati. Slot `clock` tetap default false;
+`ambient-agenda` default true karena pil yang bangun tanpa notifikasi dan tanpa
+treks memang tidak punya apa-apa untuk dikatakan.
+
 ## Rig hitam total: shell tidak melukis satu frame pun tanpa damage
 
 Kanvas `:11` terbaca hitam pekat (0 px non-hitam, termasuk strip panel) sementara

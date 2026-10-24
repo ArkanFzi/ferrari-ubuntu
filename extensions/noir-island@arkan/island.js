@@ -20,6 +20,23 @@ const MPRIS_PREFIX = 'org.mpris.MediaPlayer2.';
 const MPRIS_ROOT = 'org.mpris.MediaPlayer2';
 const MPRIS_PATH = '/org/mpris/MediaPlayer2';
 const PLAYER_IFACE = 'org.mpris.MediaPlayer2.Player';
+// Satu-satunya jalan masuk agenda di Ubuntu 24.04: tidak ada typelib ECal/Gcal
+// di mesin ini (girepository-1.0 hanya berisi Gvc-1.0, Shell-14, St-14), jadi
+// libecal tidak bisa dipakai dari extension. Server ini pula yang mengurusi
+// menu tanggal shell — island ikut di bawah payung yang sama.
+const CAL_NAME = 'org.gnome.Shell.CalendarServer';
+const CAL_PATH = '/org/gnome/Shell/CalendarServer';
+const CAL_IFACE = 'org.gnome.Shell.CalendarServer';
+// Since/Until adalah state GLOBAL server yang dibagi dengan menu tanggal
+// (terukur: klien kedua yang memasang rentang sempit mengubah properti yang
+// dibaca klien pertama). Island karenanya hanya melebar, tidak pernah
+// menyempitkan, dan tidak pernah mengulang.
+const CAL_BEHIND_S = 3600;
+const CAL_AHEAD_S = 35 * 86400;
+// Panggilan pertama bisa memicu aktivasi service (fork + buka kalender), jadi
+// timeout MPRIS 400 dtk terlalu ketat: gagal di sini cuma berarti dicoba lagi
+// lewat celah menit berikutnya.
+const CAL_ASK_TIMEOUT_MS = 2000;
 
 // Island menggantung rata di bawah panel: tanpa celah, sudut atas kotak, jadi
 // ia dibaca sebagai bagian dari bezel, bukan sebagai toast. Padding horizontal
@@ -60,7 +77,7 @@ const DWELL_MS = 1200;
 // Pengumuman isi (trek baru) melebar sebentar lalu mundur sendiri. Lamanya, dan
 // seluruh masa tampil notifikasi, bukan lagi konstanta: dia hidup di schema
 // (org.gnome.shell.extensions.noir-island) supaya bisa diputar dengan gsettings
-// tanpa logout. Yang di sini cuma nama kunci dan field tujuannya.
+// tanpa logout. Yang di sini hanya nama kunci dan field tujuannya.
 const OPT = {
   'persistent-pill': 'persistentPill',
   'show-when-paused': 'showPaused',
@@ -72,6 +89,7 @@ const OPT = {
   'idle-hide-ms': 'idleHide',
   'ambient-clock': 'ambientClock',
   'ambient-mic': 'ambientMic',
+  'ambient-agenda': 'ambientAgenda',
 };
 // Hover dibaca lewat polling global.get_pointer(), bukan captured-event MOTION
 // (di X11 tidak terkirim ke stage saat klien memegang pointer grab, jadi mati
@@ -116,6 +134,10 @@ const BODY_MAX = 160;
 const ACT_MAX = 2;
 const ACT_LABEL_MAX = 18;
 const SCAN_TICKS = 4;
+// Agenda dihitung ulang per menit, bukan per tick. Angka HH:MM di label tidak
+// berganti sampai jam melewatinya, jadi satu menit cukup untuk memindahkan
+// pil ke acara berikutnya tanpa membawa Map kalender tiap 500 dtk.
+const AGENDA_TICKS = 120;
 // Di bawah angka ini card tidak bisa memuat apa pun yang terbaca.
 const MIN_W = 200;
 // Seluruh isi card selain kolom judul pada state media: padding kiri-kanan
@@ -186,6 +208,13 @@ export class Island {
     this._micOn = false;
     this._micLabel = '';
     this._mixer = null;
+    // Peta agenda ikut dibuang saat disable(): id event bertahan lintasan
+    // enable, dan label yang sudah basi tidak boleh ikut naik.
+    this._agenda = new Map();
+    this._agendaLabel = '';
+    this._agendaProxy = null;
+    this._agendaAsked = false;
+    this._agendaEvery = 0;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -244,6 +273,7 @@ export class Island {
     this._startTray();
     this._startMpris();
     this._startMic();
+    this._startAgenda();
     this._fullscreen = !!Main.layoutManager.primaryMonitor?.inFullscreen;
     this._tickId = GLib.timeout_add(GLib.PRIORITY_LOW, TICK_MS, () => {
       this._tick();
@@ -320,6 +350,18 @@ export class Island {
       this._mixer = null;
     }
     this._micOn = false;
+
+    // Proxy agenda dilepas lewat jalur yang sama dengan player MPRIS: sinyal
+    // terpasang lewat _on() (sudah diputus di atas), objeknya lewat
+    // run_dispose(). Datanya ikut dikosongkan supaya enable() berikutnya mulai
+    // dari nol, bukan dari acara yang sudah lewat.
+    if (this._agendaProxy) {
+      this._agendaProxy.run_dispose();
+      this._agendaProxy = null;
+    }
+    this._agenda.clear();
+    this._agendaLabel = '';
+    this._agendaAsked = false;
 
     if (this._island) {
       Main.layoutManager.removeChrome(this._island);
@@ -1088,6 +1130,16 @@ export class Island {
         nilai: () => this._micLabel,
       },
       {
+        id: 'agenda',
+        enabled: () => this._opt.ambientAgenda,
+        kicker: () => false,
+        // Jam acara adalah bagian dari nilainya, bukan dari kicker: slot kicker
+        // adalah jam SEKARANG, dan menaruh jam sekarang di sebelah jam sekarang
+        // yang sudah ada di panel adalah persis duplikasi yang bikin
+        // ambient-clock dimatikan.
+        nilai: () => this._agendaLabel,
+      },
+      {
         id: 'clock',
         enabled: () => this._opt.ambientClock,
         kicker: () => true,
@@ -1186,6 +1238,122 @@ export class Island {
   // sedang dipakai" bukan konten, dia peringatan.
   _privacy() {
     return this._micOn && this._opt.ambientMic;
+  }
+
+  // -------------------------------------------------------------------- agenda
+  // Tenant agenda. Sama seperti Gvc, dia dibungkus try/catch: satu tenant tidak
+  // boleh bisa mematikan seluruh island, dan pelajaran dari mic adalah lemparan
+  // di dalam enable() terjadi SEBELUM _tick() dipasang — island hidup separuh
+  // tanpa satu pun pesan yang menunjuk ke penyebabnya.
+  _startAgenda() {
+    try {
+      this._agendaProxy = Gio.DBusProxy.new_sync(Gio.DBus.session,
+        Gio.DBusProxyFlags.NONE, null, CAL_NAME, CAL_PATH, CAL_IFACE, null);
+    } catch (e) {
+      this._agendaProxy = null;
+      log(`noir-island: agenda mati: ${e.message}`);
+      return;
+    }
+    this._on(this._agendaProxy, 'g-signal', (p, sender, member, params) =>
+      this._onAgenda(member, params));
+    // Servernya di-aktif-on-demand. Kalau nama belum punya pemilik saat
+    // enable(), jangan menyerah: _askAgenda() dipanggil lagi dari celah
+    // hitungan menit di _tick().
+    if (this._agendaProxy.g_name_owner)
+      this._askAgenda();
+  }
+
+  // Kebijakan (b): satu kali melebarkan, tidak pernah menyempitkan, tidak pernah
+  // mengulang. force_reload sengaja True — tanpa itu server yang sudah pernah
+  // dipakai menu tanggal tidak mengirim isinya kepada kita.
+  _askAgenda() {
+    if (this._agendaAsked || !this._agendaProxy?.g_name_owner)
+      return;
+    this._agendaAsked = true;
+    const now = Math.floor(GLib.DateTime.new_now_local().to_unix());
+    this._agendaProxy.call('SetTimeRange',
+      new GLib.Variant('(xxb)', [now - CAL_BEHIND_S, now + CAL_AHEAD_S, true]),
+      Gio.DBusCallFlags.NONE, CAL_ASK_TIMEOUT_MS, null, (proxy, res) => {
+        try {
+          proxy.call_finish(res);
+          log(`noir-island: agenda rentang=${CAL_BEHIND_S}..${CAL_AHEAD_S / 86400}h`);
+        } catch (e) {
+          // Gagal = belum ditanya. Buka pintu untuk percobaan menit berikutnya.
+          this._agendaAsked = false;
+          log(`noir-island: agenda gagal: ${e.message}`);
+        }
+      });
+  }
+
+  // unpack() mengembalikan Variant bersarang untuk tipe kompleks (terukur di
+  // gjs 1.80: isi[0] bertipe "variant of type a(ssxxa{sv})", bukan array), jadi
+  // yang dipakai deep_unpack() — sama seperti yang dilakukan menu tanggal shell.
+  _onAgenda(member, params) {
+    const isi = params.deep_unpack();
+    if (member === 'EventsAddedOrUpdated') {
+      for (const [id, ringkas, mulai, akhir] of isi[0])
+        this._agenda.set(id, {ringkas, mulai, akhir});
+    } else if (member === 'EventsRemoved') {
+      for (const id of isi[0])
+        this._dropAgenda(id);
+    } else if (member === 'ClientDisappeared') {
+      this._dropAgenda(`${isi[0]}\n`);
+    } else {
+      return;
+    }
+    this._syncAgenda();
+  }
+
+  // Id event dari server adalah `uid_sumber\nuid_event\n`, jadi pembersihan
+  // bekerja per prefiks: satu sumber yang hilang sekaligus membuang seluruh
+  // acaranya (aturan yang sama dipakai menu tanggal shell).
+  _dropAgenda(prefiks) {
+    for (const id of [...this._agenda.keys()])
+      if (id.startsWith(prefiks))
+        this._agenda.delete(id);
+  }
+
+  // Yang diambil bukan "acara hari ini" tapi acara pertama yang BELUM lewat:
+  // 08.00-09.00 yang masih terdaftar jam 10.00 adalah noise, sementara rapat
+  // yang sedang berlangsung justru masih layak dibaca.
+  _nextEvent() {
+    const now = Math.floor(GLib.DateTime.new_now_local().to_unix());
+    let pilih = null;
+    for (const e of this._agenda.values()) {
+      if (e.akhir <= now)
+        continue;
+      if (!pilih || e.mulai < pilih.mulai)
+        pilih = e;
+    }
+    return [pilih, now];
+  }
+
+  _syncAgenda() {
+    const [e, now] = this._nextEvent();
+    const baru = e ? this._formatAgenda(e, now) : '';
+    // Sama seperti provider lain: hanya nilai yang berubah yang boleh memanggil
+    // _render(). Island TIDAK dibangunkan di sini — agenda bukan peringatan,
+    // dan doktrin TIER 29 tetap berlaku untuk dia.
+    if (baru === this._agendaLabel)
+      return;
+    this._agendaLabel = baru;
+    this._render();
+  }
+
+  // Semua hari dihitung dari tengah malam LOKAL: VALUE=DATE 20261025 terukur
+  // datang sebagai 1792861200 = 00:00 WIB, bukan 00:00 UTC. Dari selisih
+  // hari inilah "BSK" dan ambang seharian disimpulkan — server tidak mengirim
+  // flag apa pun (additional tetap {} walau LOCATION/CATEGORIES/VALARM diisi).
+  _formatAgenda(e, now) {
+    const mulai = GLib.DateTime.new_from_unix_local(e.mulai);
+    const zona = mulai.get_utc_offset();
+    const hari = Math.floor((e.mulai + zona) / 86400) -
+      Math.floor((now + zona) / 86400);
+    const seharian = e.akhir - e.mulai >= 86400 &&
+      mulai.get_hour() === 0 && mulai.get_minute() === 0;
+    const awal = hari <= 0 ? '' : hari === 1 ? 'BSK ' : `${mulai.format('%d/%m')} `;
+    const jam = seharian ? '' : `${mulai.format('%H:%M')} `;
+    return `${awal}${jam}${e.ringkas}`.trim();
   }
 
   // Satu-satunya tempat yang memutuskan state mana yang BOLEH tampil. Aturan
@@ -2106,6 +2274,15 @@ export class Island {
     if (++this._scanEvery >= SCAN_TICKS) {
       this._scanEvery = 0;
       this._scan();
+    }
+    // Agenda punya jam sendiri yang lebih lambat: labelnya berisi jam acara,
+    // jadi satu menit cukup untuk memindahkan pil ke acara berikutnya. Celah
+    // ini juga pintu kedua untuk _askAgenda() — kalau CalendarServer belum
+    // punya pemilik nama saat enable(), percobaan berikutnya datang dari sini.
+    if (++this._agendaEvery >= AGENDA_TICKS) {
+      this._agendaEvery = 0;
+      this._askAgenda();
+      this._syncAgenda();
     }
     // Pengumuman kedaluwarsa: peek turun ke pill, atau island tidur kalau
     // pointer tidak pernah ikut datang. Tick 500 ms sudah cukup murah untuk
