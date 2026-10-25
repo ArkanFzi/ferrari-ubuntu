@@ -326,7 +326,8 @@
   font-family: Inter;
   font-size: 11px;
   font-weight: 600;
-  color: #ffffff;
+  font-style: italic;
+  color: #fed300;
   line-height: 1.25;
 }
 

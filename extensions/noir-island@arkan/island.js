@@ -518,6 +518,7 @@ export class Island {
       reactive: true,
     });
     island.set_size(PILL_W, PILL_H);
+    island.set_clip_to_allocation(true);
     this._island = island;
     island.connect('scroll-event', (actor, event) => {
       const dir = event.get_scroll_direction();
@@ -602,6 +603,7 @@ export class Island {
       y_expand: true,
       visible: false,
     });
+    this._mediaRow.set_clip_to_allocation(true);
     this._cover = new St.Bin({
       style_class: 'noir-island-cover',
       x_align: Clutter.ActorAlign.FILL,
@@ -668,9 +670,8 @@ export class Island {
       style_class: 'noir-island-lyric-active',
       y_align: Clutter.ActorAlign.CENTER,
     });
-    this._mLyric.clutter_text.line_wrap = true;
-    this._mLyric.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
-    this._mLyric.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    this._mLyric.clutter_text.line_wrap = false;
+    this._mLyric.clutter_text.ellipsize = Pango.EllipsizeMode.END;
     this._mLyric.visible = false;
     col.add_child(this._mTitle);
     col.add_child(this._mArtist);
@@ -2964,7 +2965,7 @@ export class Island {
     };
     if (this._mLyric && this._mLyric.visible) {
       this._mAlbum.visible = false;
-      this._mArtist.visible = muat(this._mArtist);
+      this._mArtist.visible = false;
     } else {
       this._mAlbum.visible = !!this._mAlbum.text && muat(this._mAlbum);
       this._mArtist.visible = muat(this._mArtist);
@@ -3503,6 +3504,12 @@ export class Island {
     const isMuted = newText.startsWith('♪') || newText.includes('...');
     const styleClass = isMuted ? 'noir-island-lyric-muted' : 'noir-island-lyric-active';
 
+    const player = this._pick();
+    if (player?.meta?.title) {
+      const m = player.meta;
+      this._mTitle.set_text(m.artist ? `${m.title} · ${m.artist}` : m.title);
+    }
+
     if (!this._mLyric.text || !this._mLyric.visible) {
       this._mLyric.set_style_class_name(styleClass);
       this._mLyric.set_text(newText);
@@ -3542,6 +3549,8 @@ export class Island {
     if (!this._mLyric || !player?.meta?.title) {
       if (this._mLyric && this._mLyric.visible) {
         this._mLyric.visible = false;
+        if (player?.meta?.title)
+          this._mTitle.set_text(player.meta.title);
         this._fitText();
       }
       return;
@@ -3566,6 +3575,8 @@ export class Island {
     if (!this._currentLyrics || !Array.isArray(this._currentLyrics) || this._currentLyrics.length === 0) {
       if (this._mLyric.visible) {
         this._mLyric.visible = false;
+        if (player?.meta?.title)
+          this._mTitle.set_text(player.meta.title);
         this._fitText();
       }
       return;
@@ -3595,6 +3606,8 @@ export class Island {
       }
     } else if (this._mLyric.visible) {
       this._mLyric.visible = false;
+      if (player?.meta?.title)
+        this._mTitle.set_text(player.meta.title);
       this._fitText();
     }
   }
