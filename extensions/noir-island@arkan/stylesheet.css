@@ -265,3 +265,69 @@
   background-color: rgba(218, 41, 28, 0.16);
   color: #ff6a58;
 }
+
+/* Weather Card (Maranello GT) */
+.noir-island-weather-tile {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ffe600; /* Modena Yellow */
+}
+
+.noir-island-wtemp {
+  font-family: Titillium Web;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #f5f5f5;
+  margin-right: 8px;
+}
+
+.noir-island-wrange {
+  font-family: Titillium Web;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: rgba(242, 242, 242, 0.50);
+}
+
+.noir-island-hourly {
+  spacing: 8px;
+  margin-right: 4px;
+}
+
+.noir-island-hslot {
+  spacing: 2px;
+  padding: 0 4px;
+}
+
+.noir-island-hslot-jam {
+  font-family: Titillium Web;
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(242, 242, 242, 0.45);
+}
+
+.noir-island-hslot-icon {
+  color: #ffe600; /* Modena Yellow */
+}
+
+.noir-island-hslot-temp {
+  font-family: Titillium Web;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f2f2f2;
+}
+
+/* Lyrics & Interactive Cover (Maranello GT) */
+.noir-island-lyric-active {
+  font-family: Inter;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.noir-island-cover:hover {
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.40);
+}

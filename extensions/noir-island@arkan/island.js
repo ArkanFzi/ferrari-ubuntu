@@ -9,6 +9,7 @@ import GLib from 'gi://GLib';
 import Gvc from 'gi://Gvc';
 import GWeather from 'gi://GWeather';
 import Pango from 'gi://Pango';
+import Soup from 'gi://Soup?version=3.0';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -168,11 +169,13 @@ const MEDIA_CHROME_W = 251;
 const CARD_W = {
   media: MEDIA_W,
   notif: NOTIF_W,
+  weather: MEDIA_W,
 };
 
 const CARD_H = {
   media: MEDIA_H + PROGRESS_H,
   notif: NOTIF_H,
+  weather: MEDIA_H + PROGRESS_H,
 };
 
 const LEVEL_W = {
@@ -236,7 +239,13 @@ export class Island {
     // memegang koneksi keluar, dan labelnya tidak boleh naik ke sesi berikutnya.
     this._weatherInfo = null;
     this._weatherLabel = '';
+    this._weatherCityName = null;
     this._weatherEvery = 0;
+    this._soupSession = new Soup.Session();
+    this._lyricsCache = new Map();
+    this._currentLyrics = null;
+    this._lyricsKey = null;
+    this._lyricsFetching = null;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -402,6 +411,16 @@ export class Island {
       this._weatherInfo = null;
     }
     this._weatherLabel = '';
+    this._weatherCityName = null;
+
+    if (this._soupSession) {
+      this._soupSession.abort();
+      this._soupSession = null;
+    }
+    this._lyricsCache.clear();
+    this._currentLyrics = null;
+    this._lyricsKey = null;
+    this._lyricsFetching = null;
 
     if (this._island) {
       Main.layoutManager.removeChrome(this._island);
@@ -497,6 +516,29 @@ export class Island {
       // CENTER, bukan FILL: tinggi 44 px di CSS hanya batas bawah, jadi Bin yang
       // fill ikut meregang setinggi barisnya (thumb jadi persegi panjang).
       y_align: Clutter.ActorAlign.CENTER,
+      reactive: true,
+      track_hover: true,
+    });
+    this._cover.connect('scroll-event', (actor, event) => {
+      const dir = event.get_scroll_direction();
+      const player = this._pick();
+      if (!player) return Clutter.EVENT_PROPAGATE;
+      if (dir === Clutter.ScrollDirection.UP) {
+        this._changeVolume(player, 0.05);
+        return Clutter.EVENT_STOP;
+      } else if (dir === Clutter.ScrollDirection.DOWN) {
+        this._changeVolume(player, -0.05);
+        return Clutter.EVENT_STOP;
+      }
+      return Clutter.EVENT_PROPAGATE;
+    });
+    this._cover.connect('button-press-event', () => {
+      const player = this._pick();
+      if (player) {
+        this._raisePlayer(player);
+        return Clutter.EVENT_STOP;
+      }
+      return Clutter.EVENT_PROPAGATE;
     });
     // Tile artwork dibiarkan berisi ikon sampai ada art sungguhan, supaya card
     // tidak pernah membuka dengan kotak kosong.
@@ -515,9 +557,12 @@ export class Island {
     this._mTitle = this._label('noir-island-title');
     this._mArtist = this._label('noir-island-line');
     this._mAlbum = this._label('noir-island-faint');
+    this._mLyric = this._label('noir-island-lyric-active');
+    this._mLyric.visible = false;
     col.add_child(this._mTitle);
     col.add_child(this._mArtist);
     col.add_child(this._mAlbum);
+    col.add_child(this._mLyric);
 
     this._time = new St.Label({
       style_class: 'noir-island-time',
@@ -565,8 +610,27 @@ export class Island {
       // 3 px tidak pernah bisa dipanggil, dan rail inilah satu-satunya jalur seek
       // di card.
       reactive: true,
+      track_hover: true,
     });
     this._progress.connect('button-press-event', (a, e) => this._seekAt(e));
+    this._progress.connect('notify::hover', () => {
+      if (!this._progress.hover) {
+        const player = this._pick();
+        if (player) this._updateProgress(player);
+      }
+    });
+    this._progress.connect('motion-event', (a, e) => {
+      const player = this._pick();
+      if (!player || !player.meta?.length) return Clutter.EVENT_PROPAGATE;
+      const [ax] = this._progress.get_transformed_position();
+      const lebar = this._progress.get_allocation_box().get_width();
+      if (lebar <= 0) return Clutter.EVENT_PROPAGATE;
+      const [x] = e.get_coords();
+      const ratio = Math.min(1, Math.max(0, (x - ax) / lebar));
+      const targetSec = ratio * player.meta.length;
+      this._time.set_text(`${mmss(targetSec)} / ${mmss(player.meta.length)}`);
+      return Clutter.EVENT_PROPAGATE;
+    });
     this._progressFill = new St.Widget({style_class: 'noir-island-progfill'});
     // _progress tidak punya layout manager (anaknya dulu dialokasi 5x0 karena
     // itu), jadi posisi bar dituliskan tangan: mendarat di dasar band.
@@ -628,6 +692,101 @@ export class Island {
     this._notifRow.add_child(ncol);
     this._notifRow.add_child(btns);
     island.add_child(this._notifRow);
+
+    // Weather Card (Maranello GT): icon tile, city + cond, temp + range, hairline, 4 hourly slots
+    this._weatherRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._weatherTile = new St.Bin({
+      style_class: 'noir-island-weather-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._wIcon = new St.Icon({
+      icon_name: 'weather-clear-symbolic',
+      icon_size: 24,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._weatherTile.set_child(this._wIcon);
+
+    const wcol = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._wCity = this._label('noir-island-title');
+    this._wCond = this._label('noir-island-line');
+    wcol.add_child(this._wCity);
+    wcol.add_child(this._wCond);
+
+    const wtempBox = new St.BoxLayout({
+      vertical: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._wTemp = new St.Label({
+      style_class: 'noir-island-wtemp',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._wRange = new St.Label({
+      style_class: 'noir-island-wrange',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    wtempBox.add_child(this._wTemp);
+    wtempBox.add_child(this._wRange);
+
+    this._weatherCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    const wInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    wInfoBox.add_child(this._weatherTile);
+    wInfoBox.add_child(wcol);
+    wInfoBox.add_child(wtempBox);
+    this._weatherCollapse.set_child(wInfoBox);
+    this._weatherCollapse.connect('clicked', () => this._collapse());
+
+    this._wHourlyBox = new St.BoxLayout({
+      style_class: 'noir-island-hourly',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._wSlots = [];
+    for (let s = 0; s < 4; s++) {
+      const sbox = new St.BoxLayout({
+        vertical: true,
+        style_class: 'noir-island-hslot',
+        y_align: Clutter.ActorAlign.CENTER,
+      });
+      const sjam = new St.Label({
+        style_class: 'noir-island-hslot-jam',
+        x_align: Clutter.ActorAlign.CENTER,
+      });
+      const sicon = new St.Icon({
+        icon_name: 'weather-clear-symbolic',
+        icon_size: 16,
+        x_align: Clutter.ActorAlign.CENTER,
+        style_class: 'noir-island-hslot-icon',
+      });
+      const stemp = new St.Label({
+        style_class: 'noir-island-hslot-temp',
+        x_align: Clutter.ActorAlign.CENTER,
+      });
+      sbox.add_child(sjam);
+      sbox.add_child(sicon);
+      sbox.add_child(stemp);
+      this._wHourlyBox.add_child(sbox);
+      this._wSlots.push({box: sbox, jam: sjam, icon: sicon, temp: stemp});
+    }
+
+    this._weatherRow.add_child(this._weatherCollapse);
+    this._weatherRow.add_child(this._hairline());
+    this._weatherRow.add_child(this._wHourlyBox);
+    island.add_child(this._weatherRow);
   }
 
   _hairline() {
@@ -910,6 +1069,15 @@ export class Island {
         return 'pill';
       return this._hoverOn ? 'pill' : null;
     }
+    if (content === 'weather') {
+      const bangun = this._awake();
+      return (this._cardOpen && bangun) ? 'card' : (this._hoverOn ? 'pill' : null);
+    }
+    if (content === 'idle') {
+      const bangun = this._awake();
+      if (this._cardOpen && bangun && this._ambient()?.id === 'weather')
+        return 'card';
+    }
     return this._hoverOn || this._privacy() ? 'pill' : null;
   }
 
@@ -952,8 +1120,8 @@ export class Island {
     this._armOutside(false);
     this._setActive(false);
     this._setClock(true);
-    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._progress])
-      row.visible = false;
+    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._progress])
+      if (row) row.visible = false;
     const [x, y] = this._anchor(this._island.width);
     this._island.ease({
       height: 0,
@@ -1015,6 +1183,7 @@ export class Island {
     this._fadeTo(level, content);
     this._setActive(true);
     this._setClock(level === 'pill');
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather'));
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
@@ -1022,7 +1191,9 @@ export class Island {
   // pola island yang tumbuh dulu baru menampilkan isinya.
   _fadeTo(level, content) {
     const rows = level !== 'card' ? [this._pillRow]
-      : content === 'notif' ? [this._notifRow] : [this._mediaRow, this._progress];
+      : content === 'notif' ? [this._notifRow]
+      : content === 'weather' ? [this._weatherRow]
+      : [this._mediaRow, this._progress];
     for (const row of rows) {
       if (!row)
         continue;
@@ -1419,6 +1590,7 @@ export class Island {
       this._weatherInfo = null;
     }
     this._weatherLabel = '';
+    this._weatherCityName = null;
     const [teks, city] = this._weatherLoc();
     if (!teks) {
       log('noir-island: cuaca tanpa lokasi');
@@ -1431,6 +1603,7 @@ export class Island {
       return;
     }
     try {
+      this._weatherCityName = city.get_city_name();
       this._weatherInfo = new GWeather.Info({
         application_id: 'noir.island.Weather',
         contact_info: 'noir-island@arkan (extension GNOME Shell, mesin lokal)',
@@ -1438,10 +1611,11 @@ export class Island {
       });
       this._weatherInfo.set_location(city);
       this._on(this._weatherInfo, 'updated', () => this._syncWeather());
-      log(`noir-island: cuaca kota=${city.get_city_name()} ${teks}`);
+      log(`noir-island: cuaca kota=${this._weatherCityName} ${teks}`);
       this._refreshWeather();
     } catch (e) {
       this._weatherInfo = null;
+      this._weatherCityName = null;
       log(`noir-island: cuaca mati: ${e.message}`);
       this._render();
     }
@@ -1607,6 +1781,9 @@ export class Island {
       return `media|${m.title}|${m.artist}|${m.album}|${player.status}`
         + `|${player.canPrev}${player.canNext}|${m.key ?? m.title}`;
     }
+    if (state === 'weather') {
+      return `weather|${this._weatherCityName ?? ''}|${this._weatherLabel}`;
+    }
     const p = this._ambient();
     this._ambientId = p?.id ?? '-';
     this._ambientNilai = p ? p.nilai() : '';
@@ -1638,7 +1815,9 @@ export class Island {
       content = raw;
     // Card adalah permintaan eksplisit; kalau isinya sudah jadi idle, tidak ada
     // lagi yang bisa dibuka.
-    if (content === 'idle')
+    if (content === 'idle' && this._cardOpen && this._ambient()?.id === 'weather')
+      content = 'weather';
+    else if (content === 'idle')
       this._cardOpen = false;
 
     // Isi dihitung dulu, baru level: _peekUntil yang dipasang di sini adalah
@@ -1691,11 +1870,14 @@ export class Island {
     this._mediaRow.visible = card && content === 'media';
     this._progress.visible = card && content === 'media';
     this._notifRow.visible = card && content === 'notif';
+    this._weatherRow.visible = card && content === 'weather';
 
     if (card && content === 'notif')
       this._fillNotif(badge);
-    else if (card)
+    else if (card && content === 'media')
       this._fillMedia(player);
+    else if (card && content === 'weather')
+      this._fillWeather();
     else
       this._fillPill(player, content, jam, badge);
 
@@ -1767,8 +1949,10 @@ export class Island {
     this._progress.reactive = boleh && player.canSeek !== false && !!m.length;
     this._loadCover(m.art, m.key);
     this._updateProgress(player);
-    if (ganti)
+    if (ganti) {
       this._rampTo(this._mediaRow, TULIS_OPACITY, 255, {dari: 0});
+      this._fetchLyrics(player);
+    }
   }
 
   // Waktu tidak pernah dikorbankan. "0:12 / 3:30" adalah alasan orang membuka
@@ -1782,8 +1966,13 @@ export class Island {
       const [, nat] = l.get_preferred_width(-1);
       return !Number.isFinite(nat) || nat <= textW;
     };
-    this._mAlbum.visible = !!this._mAlbum.text && muat(this._mAlbum);
-    this._mArtist.visible = muat(this._mArtist);
+    if (this._mLyric && this._mLyric.visible) {
+      this._mAlbum.visible = false;
+      this._mArtist.visible = muat(this._mArtist);
+    } else {
+      this._mAlbum.visible = !!this._mAlbum.text && muat(this._mAlbum);
+      this._mArtist.visible = muat(this._mArtist);
+    }
   }
 
   _updateProgress(player) {
@@ -1805,6 +1994,7 @@ export class Island {
       duration: TICK_MS,
       mode: Clutter.AnimationMode.LINEAR,
     });
+    this._updateLyrics(player, elapsed);
   }
 
   _fillNotif(badge) {
@@ -1882,6 +2072,184 @@ export class Island {
 
   _dndOff() {
     return !this._notifSettings.get_boolean('show-banners');
+  }
+
+  _fillWeather() {
+    const i = this._weatherInfo;
+    if (!i || !i.is_valid())
+      return;
+    const [hasT, t] = i.get_value_temp(GWeather.TemperatureUnit.CENTIGRADE);
+    const tempStr = hasT ? `${Math.round(t)}°` : '--°';
+    const cityStr = this._weatherCityName || 'Cuaca';
+    const summary = String(i.get_weather_summary() ?? '');
+    const condStr = summary.includes(': ') ? summary.split(': ')[1] : summary;
+    const iconName = i.get_symbolic_icon_name() || 'weather-clear-symbolic';
+
+    this._wIcon.set_icon_name(iconName);
+    this._wCity.set_text(cityStr);
+    this._wCond.set_text(condStr === 'Unknown' ? '' : condStr);
+    this._wTemp.set_text(tempStr);
+
+    const list = i.get_forecast_list() ?? [];
+    let minT = 999;
+    let maxT = -999;
+    const validHours = [];
+
+    // Loop mulai dari index 1 untuk menghindari forecast_list[0] rusak (epoch=0)
+    for (let idx = 1; idx < list.length && idx <= 24; idx++) {
+      const item = list[idx];
+      const [hasVal, tempVal] = item.get_value_temp(GWeather.TemperatureUnit.CENTIGRADE);
+      const [hasUp, epoch] = item.get_value_update();
+      if (!hasVal || !hasUp || epoch <= 0)
+        continue;
+      if (tempVal < minT) minT = tempVal;
+      if (tempVal > maxT) maxT = tempVal;
+
+      if (validHours.length < 4) {
+        const dt = GLib.DateTime.new_from_unix_local(epoch);
+        const jam = dt ? dt.format('%H:%M') : '';
+        const hIcon = item.get_symbolic_icon_name() || 'weather-clear-symbolic';
+        validHours.push({
+          jam,
+          icon: hIcon,
+          temp: `${Math.round(tempVal)}°`,
+        });
+      }
+    }
+
+    if (minT <= maxT && minT !== 999) {
+      this._wRange.set_text(`H: ${Math.round(maxT)}°  L: ${Math.round(minT)}°`);
+      this._wRange.visible = true;
+    } else {
+      this._wRange.visible = false;
+    }
+
+    for (let slotIdx = 0; slotIdx < 4; slotIdx++) {
+      const slot = this._wSlots[slotIdx];
+      const data = validHours[slotIdx];
+      if (data) {
+        slot.jam.set_text(data.jam);
+        slot.icon.set_icon_name(data.icon);
+        slot.temp.set_text(data.temp);
+        slot.box.visible = true;
+      } else {
+        slot.box.visible = false;
+      }
+    }
+  }
+
+  _fetchLyrics(player) {
+    const m = player.meta;
+    if (!m || !m.title)
+      return;
+    const key = `${m.title}|${m.artist}`;
+    if (this._lyricsCache.has(key)) {
+      this._currentLyrics = this._lyricsCache.get(key);
+      this._lyricsKey = key;
+      this._updateLyrics(player);
+      return;
+    }
+    if (this._lyricsFetching === key || !this._soupSession)
+      return;
+    this._lyricsFetching = key;
+
+    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(m.title)}&artist_name=${encodeURIComponent(m.artist || '')}&duration=${Math.round(m.length || 0)}`;
+    try {
+      const msg = Soup.Message.new('GET', url);
+      msg.request_headers.append('User-Agent', 'noir-island/1.0 (https://github.com/arkan/noir-island)');
+      this._soupSession.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
+        this._lyricsFetching = null;
+        try {
+          const bytes = session.send_and_read_finish(res);
+          const text = new TextDecoder().decode(bytes.get_data());
+          const data = JSON.parse(text);
+          if (data && data.syncedLyrics) {
+            const parsed = this._parseLRC(data.syncedLyrics);
+            this._lyricsCache.set(key, parsed);
+            if (this._shownKey === (m.key || `${m.title}|${m.artist}`)) {
+              this._currentLyrics = parsed;
+              this._lyricsKey = key;
+              this._updateLyrics(player);
+            }
+          } else {
+            this._lyricsCache.set(key, null);
+          }
+        } catch (e) {
+          this._lyricsCache.set(key, null);
+        }
+      });
+    } catch (e) {
+      this._lyricsFetching = null;
+    }
+  }
+
+  _parseLRC(lrcText) {
+    const lines = lrcText.split('\n');
+    const result = [];
+    const reg = /^\[(\d{2}):(\d{2}(?:\.\d+)?)\](.*)$/;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = reg.exec(trimmed);
+      if (match) {
+        const min = parseInt(match[1], 10);
+        const sec = parseFloat(match[2]);
+        const text = match[3].trim();
+        if (text) {
+          result.push({ t: min * 60 + sec, text });
+        }
+      }
+    }
+    result.sort((a, b) => a.t - b.t);
+    return result.length > 0 ? result : null;
+  }
+
+  _updateLyrics(player, elapsed) {
+    if (!this._mLyric || !this._currentLyrics || this._currentLyrics.length === 0) {
+      if (this._mLyric && this._mLyric.visible) {
+        this._mLyric.visible = false;
+        this._fitText();
+      }
+      return;
+    }
+    const cur = elapsed ?? (player.status === 'Playing'
+      ? player.pos + player.rate * (monoMs() - player.posAt) / 1000
+      : player.pos);
+    let active = null;
+    for (let i = 0; i < this._currentLyrics.length; i++) {
+      if (cur >= this._currentLyrics[i].t) {
+        active = this._currentLyrics[i];
+      } else {
+        break;
+      }
+    }
+    if (active) {
+      if (active.text !== this._mLyric.text || !this._mLyric.visible) {
+        this._mLyric.set_text(active.text);
+        this._mLyric.visible = true;
+        this._fitText();
+      }
+    } else if (this._mLyric.visible) {
+      this._mLyric.visible = false;
+      this._fitText();
+    }
+  }
+
+  _changeVolume(player, delta) {
+    const cur = typeof player.volume === 'number' ? player.volume : 1.0;
+    const next = Math.max(0, Math.min(1.0, cur + delta));
+    player.volume = next;
+    Gio.DBus.session.call(player.name, MPRIS_PATH, PROPS_IFACE, 'Set',
+      new GLib.Variant('(ssv)', [PLAYER_IFACE, 'Volume', new GLib.Variant('d', next)]),
+      null, Gio.DBusCallFlags.NONE, DBUS_TIMEOUT_MS, null, () => {});
+    this._wake();
+    log(`noir-island: volume ${(next * 100).toFixed(0)}% (${player.identity})`);
+  }
+
+  _raisePlayer(player) {
+    this._wake();
+    log(`noir-island: raise ${player.identity}`);
+    Gio.DBus.session.call(player.name, MPRIS_PATH, MPRIS_ROOT, 'Raise',
+      null, null, Gio.DBusCallFlags.NONE, DBUS_TIMEOUT_MS, null, () => {});
   }
 
   // -------------------------------------------------------------------- media
