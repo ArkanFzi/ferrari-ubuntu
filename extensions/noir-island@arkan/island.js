@@ -173,6 +173,10 @@ const CARD_W = {
   weather: MEDIA_W,
   telemetry: MEDIA_W,
   timer: MEDIA_W,
+  drop: MEDIA_W,
+  clip: MEDIA_W,
+  cmd: MEDIA_W,
+  radio: MEDIA_W,
 };
 
 const CARD_H = {
@@ -181,6 +185,10 @@ const CARD_H = {
   weather: MEDIA_H + PROGRESS_H,
   telemetry: MEDIA_H + PROGRESS_H,
   timer: MEDIA_H + PROGRESS_H,
+  drop: MEDIA_H + PROGRESS_H,
+  clip: MEDIA_H + PROGRESS_H,
+  cmd: MEDIA_H + PROGRESS_H,
+  radio: MEDIA_H + PROGRESS_H,
 };
 
 const LEVEL_W = {
@@ -289,6 +297,12 @@ export class Island {
     this._timerStart = 0;
     this._timerAccum = 0;
     this._timerMode = 'pomodoro';
+    this._droppedFiles = [];
+    this._clipStack = [];
+    this._lastClipText = '';
+    this._cmdOutput = 'READY · PIT WALL V6';
+    this._radioDuration = 0;
+    this._radioStartTime = 0;
     this._outsideId = 0;
     this._active = null;
     this._clockHiddenByUs = false;
@@ -1040,6 +1054,342 @@ export class Island {
     this._timerRow.add_child(this._hairline());
     this._timerRow.add_child(this._navBox('timer'));
     island.add_child(this._timerRow);
+
+    // --------------------------------------------------- Rosso Notch Drop Shelf
+    this._dropRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._dropCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._dropCollapse.connect('clicked', () => this._collapse());
+
+    this._dropTile = new St.Bin({
+      style_class: 'noir-island-drop-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._dropIcon = new St.Icon({
+      icon_name: 'folder-download-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._dropTile.set_child(this._dropIcon);
+
+    const dropCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._dropTitle = this._label('noir-island-title');
+    this._dropSub = this._label('noir-island-line');
+    this._noEllipsis(this._dropTitle);
+    this._noEllipsis(this._dropSub);
+    dropCol1.add_child(this._dropTitle);
+    dropCol1.add_child(this._dropSub);
+
+    const dropInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    dropInfoBox.add_child(this._dropTile);
+    dropInfoBox.add_child(dropCol1);
+    this._dropCollapse.set_child(dropInfoBox);
+
+    const dropCol2 = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._dropOpenBtn = new St.Button({
+      style_class: 'noir-island-drop-btn',
+      can_focus: false,
+    });
+    this._dropOpenBtn.set_child(new St.Label({text: 'DOWNLOADS'}));
+    this._dropOpenBtn.connect('clicked', () => {
+      try {
+        Gio.AppInfo.launch_default_for_uri('file:///home/arkan/Downloads', null);
+      } catch (_) {}
+    });
+
+    this._dropClearBtn = new St.Button({
+      style_class: 'noir-island-drop-btn',
+      can_focus: false,
+    });
+    this._dropClearBtn.set_child(new St.Label({text: 'BERSIHKAN'}));
+    this._dropClearBtn.connect('clicked', () => {
+      this._droppedFiles = [];
+      this._fillDrop();
+    });
+
+    dropCol2.add_child(this._dropOpenBtn);
+    dropCol2.add_child(this._dropClearBtn);
+
+    this._dropRow.add_child(this._dropCollapse);
+    this._dropRow.add_child(this._hairline());
+    this._dropRow.add_child(dropCol2);
+    this._dropRow.add_child(this._hairline());
+    this._dropRow.add_child(this._navBox('drop'));
+    island.add_child(this._dropRow);
+
+    // --------------------------------------------------- Carbon Clipboard Stack
+    this._clipRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._clipCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._clipCollapse.connect('clicked', () => this._collapse());
+
+    this._clipTile = new St.Bin({
+      style_class: 'noir-island-clip-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._clipIcon = new St.Icon({
+      icon_name: 'edit-copy-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._clipTile.set_child(this._clipIcon);
+
+    const clipCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const clipTitleRow = new St.BoxLayout({style_class: 'noir-island-row'});
+    this._clipSwatch = new St.Widget({
+      style_class: 'noir-island-clip-swatch',
+      visible: false,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._clipTitle = this._label('noir-island-title');
+    this._noEllipsis(this._clipTitle);
+    clipTitleRow.add_child(this._clipSwatch);
+    clipTitleRow.add_child(this._clipTitle);
+
+    this._clipSub = this._label('noir-island-line');
+    this._noEllipsis(this._clipSub);
+    clipCol1.add_child(clipTitleRow);
+    clipCol1.add_child(this._clipSub);
+
+    const clipInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    clipInfoBox.add_child(this._clipTile);
+    clipInfoBox.add_child(clipCol1);
+    this._clipCollapse.set_child(clipInfoBox);
+
+    const clipCol2 = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._clipCopyBtn = new St.Button({
+      style_class: 'noir-island-clip-btn',
+      can_focus: false,
+    });
+    this._clipCopyBtn.set_child(new St.Label({text: 'SALIN'}));
+    this._clipCopyBtn.connect('clicked', () => {
+      if (this._clipStack.length > 0) {
+        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, this._clipStack[0]);
+        this._clipTitle.set_text('DISALIN KE PAPAN KLIP!');
+      }
+    });
+
+    this._clipClearBtn = new St.Button({
+      style_class: 'noir-island-clip-btn',
+      can_focus: false,
+    });
+    this._clipClearBtn.set_child(new St.Label({text: 'HAPUS'}));
+    this._clipClearBtn.connect('clicked', () => {
+      this._clipStack = [];
+      this._lastClipText = '';
+      St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, '');
+      this._fillClip();
+    });
+
+    clipCol2.add_child(this._clipCopyBtn);
+    clipCol2.add_child(this._clipClearBtn);
+
+    this._clipRow.add_child(this._clipCollapse);
+    this._clipRow.add_child(this._hairline());
+    this._clipRow.add_child(clipCol2);
+    this._clipRow.add_child(this._hairline());
+    this._clipRow.add_child(this._navBox('clip'));
+    island.add_child(this._clipRow);
+
+    // --------------------------------------------------- Pit Command Bar
+    this._cmdRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._cmdCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._cmdCollapse.connect('clicked', () => this._collapse());
+
+    this._cmdTile = new St.Bin({
+      style_class: 'noir-island-cmd-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._cmdIcon = new St.Icon({
+      icon_name: 'utilities-terminal-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._cmdTile.set_child(this._cmdIcon);
+
+    const cmdCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._cmdTitle = this._label('noir-island-title');
+    this._cmdSub = new St.Label({
+      style_class: 'noir-island-cmd-output',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._noEllipsis(this._cmdTitle);
+    this._noEllipsis(this._cmdSub);
+    cmdCol1.add_child(this._cmdTitle);
+    cmdCol1.add_child(this._cmdSub);
+
+    const cmdInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    cmdInfoBox.add_child(this._cmdTile);
+    cmdInfoBox.add_child(cmdCol1);
+    this._cmdCollapse.set_child(cmdInfoBox);
+
+    const cmdCol2 = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const cmdGitBtn = new St.Button({
+      style_class: 'noir-island-cmd-btn',
+      can_focus: false,
+    });
+    cmdGitBtn.set_child(new St.Label({text: 'GIT'}));
+    cmdGitBtn.connect('clicked', () => this._execCmd('git'));
+
+    const cmdIpBtn = new St.Button({
+      style_class: 'noir-island-cmd-btn',
+      can_focus: false,
+    });
+    cmdIpBtn.set_child(new St.Label({text: 'IP'}));
+    cmdIpBtn.connect('clicked', () => this._execCmd('ip'));
+
+    const cmdAudioBtn = new St.Button({
+      style_class: 'noir-island-cmd-btn',
+      can_focus: false,
+    });
+    cmdAudioBtn.set_child(new St.Label({text: 'PW-RST'}));
+    cmdAudioBtn.connect('clicked', () => this._execCmd('audio'));
+
+    cmdCol2.add_child(cmdGitBtn);
+    cmdCol2.add_child(cmdIpBtn);
+    cmdCol2.add_child(cmdAudioBtn);
+
+    this._cmdRow.add_child(this._cmdCollapse);
+    this._cmdRow.add_child(this._hairline());
+    this._cmdRow.add_child(cmdCol2);
+    this._cmdRow.add_child(this._hairline());
+    this._cmdRow.add_child(this._navBox('cmd'));
+    island.add_child(this._cmdRow);
+
+    // --------------------------------------------------- Team Radio Cockpit
+    this._radioRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._radioCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._radioCollapse.connect('clicked', () => this._collapse());
+
+    this._radioTile = new St.Bin({
+      style_class: 'noir-island-radio-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radioIcon = new St.Icon({
+      icon_name: 'audio-input-microphone-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radioTile.set_child(this._radioIcon);
+
+    const radioCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radioTitle = this._label('noir-island-title');
+    this._radioSub = new St.Label({
+      style_class: 'noir-island-radio-live',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._noEllipsis(this._radioTitle);
+    this._noEllipsis(this._radioSub);
+    radioCol1.add_child(this._radioTitle);
+    radioCol1.add_child(this._radioSub);
+
+    const radioInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    radioInfoBox.add_child(this._radioTile);
+    radioInfoBox.add_child(radioCol1);
+    this._radioCollapse.set_child(radioInfoBox);
+
+    const radioCol2 = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radioMuteBtn = new St.Button({
+      style_class: 'noir-island-radio-mute-btn',
+      can_focus: false,
+    });
+    this._radioMuteLabel = new St.Label({text: 'MUTE'});
+    this._radioMuteBtn.set_child(this._radioMuteLabel);
+    this._radioMuteBtn.connect('clicked', () => {
+      try {
+        if (this._mixer) {
+          const src = this._mixer.get_default_source();
+          if (src) {
+            const isMuted = src.get_is_muted();
+            src.set_is_muted(!isMuted);
+            this._fillRadio();
+          }
+        }
+      } catch (_) {}
+    });
+
+    radioCol2.add_child(this._radioMuteBtn);
+
+    this._radioRow.add_child(this._radioCollapse);
+    this._radioRow.add_child(this._hairline());
+    this._radioRow.add_child(radioCol2);
+    this._radioRow.add_child(this._hairline());
+    this._radioRow.add_child(this._navBox('radio'));
+    island.add_child(this._radioRow);
   }
 
   _navBox(currentMode) {
@@ -1051,6 +1401,10 @@ export class Island {
       { id: 'media', icon: 'audio-x-generic-symbolic' },
       { id: 'telemetry', icon: 'utilities-system-monitor-symbolic' },
       { id: 'timer', icon: 'preferences-system-time-symbolic' },
+      { id: 'drop', icon: 'folder-download-symbolic' },
+      { id: 'clip', icon: 'edit-copy-symbolic' },
+      { id: 'cmd', icon: 'utilities-terminal-symbolic' },
+      { id: 'radio', icon: 'audio-input-microphone-symbolic' },
       { id: 'weather', icon: 'weather-clear-symbolic' },
     ];
     for (const item of items) {
@@ -1060,7 +1414,7 @@ export class Island {
       });
       const icon = new St.Icon({
         icon_name: item.icon,
-        icon_size: 13,
+        icon_size: 12,
       });
       btn.set_child(icon);
       btn.connect('clicked', () => {
@@ -1354,7 +1708,8 @@ export class Island {
         return 'pill';
       return this._hoverOn ? 'pill' : null;
     }
-    if (content === 'weather' || content === 'telemetry' || content === 'timer') {
+    if (content === 'weather' || content === 'telemetry' || content === 'timer' ||
+        content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio') {
       const bangun = this._awake();
       return (this._cardOpen && bangun) ? 'card' : (this._hoverOn ? 'pill' : null);
     }
@@ -1407,7 +1762,7 @@ export class Island {
     this._armOutside(false);
     this._setActive(false);
     this._setClock(true);
-    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._telemetryRow, this._timerRow, this._progress])
+    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._telemetryRow, this._timerRow, this._dropRow, this._clipRow, this._cmdRow, this._radioRow, this._progress])
       if (row) row.visible = false;
     const [x, y] = this._anchor(this._island.width);
     this._island.ease({
@@ -1503,7 +1858,7 @@ export class Island {
     this._fadeTo(level, content);
     this._setActive(true);
     this._setClock(level === 'pill');
-    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer'));
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio'));
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
@@ -1515,6 +1870,10 @@ export class Island {
       : content === 'weather' ? [this._weatherRow]
       : content === 'telemetry' ? [this._telemetryRow]
       : content === 'timer' ? [this._timerRow]
+      : content === 'drop' ? [this._dropRow]
+      : content === 'clip' ? [this._clipRow]
+      : content === 'cmd' ? [this._cmdRow]
+      : content === 'radio' ? [this._radioRow]
       : [this._mediaRow, this._progress];
     for (const row of rows) {
       if (!row)
@@ -2120,6 +2479,18 @@ export class Island {
     if (state === 'timer') {
       return `timer|${this._timerMode}|${this._timerRunning}|${Math.floor(this._timerAccum / 1000)}`;
     }
+    if (state === 'drop') {
+      return `drop|${this._droppedFiles.length}|${this._droppedFiles[0]?.name ?? ''}`;
+    }
+    if (state === 'clip') {
+      return `clip|${this._clipStack.length}|${this._clipStack[0] ?? ''}`;
+    }
+    if (state === 'cmd') {
+      return `cmd|${this._cmdOutput}`;
+    }
+    if (state === 'radio') {
+      return `radio|${this._micOn}|${this._radioDuration}`;
+    }
     const p = this._ambient();
     this._ambientId = p?.id ?? '-';
     this._ambientNilai = p ? p.nilai() : '';
@@ -2185,7 +2556,7 @@ export class Island {
         this._stow();
       return;
     }
-    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer'));
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio'));
 
     // Jam menit masuk ke kunci lukisan pill, bukan ke signature isi: pill harus
     // mengganti angkanya sekali semenet, tapi card media tidak boleh tergambar
@@ -2215,6 +2586,10 @@ export class Island {
     this._weatherRow.visible = card && content === 'weather';
     this._telemetryRow.visible = card && content === 'telemetry';
     this._timerRow.visible = card && content === 'timer';
+    this._dropRow.visible = card && content === 'drop';
+    this._clipRow.visible = card && content === 'clip';
+    this._cmdRow.visible = card && content === 'cmd';
+    this._radioRow.visible = card && content === 'radio';
 
     if (card && content === 'notif')
       this._fillNotif(badge);
@@ -2226,6 +2601,14 @@ export class Island {
       this._fillTelemetry();
     else if (card && content === 'timer')
       this._fillTimer();
+    else if (card && content === 'drop')
+      this._fillDrop();
+    else if (card && content === 'clip')
+      this._fillClip();
+    else if (card && content === 'cmd')
+      this._fillCmd();
+    else if (card && content === 'radio')
+      this._fillRadio();
     else
       this._fillPill(player, content, jam, badge);
 
@@ -2610,6 +2993,117 @@ export class Island {
         icon_name: this._timerRunning ? 'media-playback-pause-symbolic' : 'media-playback-start-symbolic',
         icon_size: 16,
       }));
+    }
+  }
+
+  _fillDrop() {
+    if (this._droppedFiles.length === 0) {
+      this._dropTitle.set_text('ROSSO NOTCH DROP');
+      this._dropSub.set_text('Siap menampung file / unduhan');
+      this._dropTile.remove_style_class_name('noir-island-drop-tile--active');
+    } else {
+      const top = this._droppedFiles[0];
+      this._dropTitle.set_text(top.name || 'File Tersimpan');
+      this._dropSub.set_text(`${this._droppedFiles.length} file di shelf · ${top.size || ''}`);
+      this._dropTile.add_style_class_name('noir-island-drop-tile--active');
+    }
+  }
+
+  _syncClip() {
+    try {
+      St.Clipboard.get_default().get_text(St.ClipboardType.CLIPBOARD, (_, text) => {
+        if (!text || text === this._lastClipText)
+          return;
+        this._lastClipText = text;
+        const trimmed = text.trim();
+        if (!trimmed)
+          return;
+        this._clipStack = [trimmed, ...this._clipStack.filter(x => x !== trimmed)].slice(0, 5);
+        if (this._clipRow && this._clipRow.visible)
+          this._fillClip();
+      });
+    } catch (_) {}
+  }
+
+  _fillClip() {
+    if (this._clipStack.length === 0) {
+      this._clipTitle.set_text('PAPAN KLIP KOSONG');
+      this._clipSub.set_text('Salin teks apa pun untuk melihat riwayat');
+      this._clipSwatch.visible = false;
+      return;
+    }
+    const current = this._clipStack[0];
+    const isHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(current);
+    if (isHex) {
+      this._clipSwatch.set_style(`background-color: ${current};`);
+      this._clipSwatch.visible = true;
+      this._clipTitle.set_text(`WARNA HEX: ${current.toUpperCase()}`);
+    } else {
+      this._clipSwatch.visible = false;
+      const clean = current.replace(/\s+/g, ' ');
+      this._clipTitle.set_text(clean.length > 28 ? `${clean.slice(0, 27)}…` : clean);
+    }
+    this._clipSub.set_text(`${this._clipStack.length} klip tersimpan di stack`);
+  }
+
+  _execCmd(cmdType) {
+    if (cmdType === 'git') {
+      try {
+        const [ok, out] = GLib.spawn_command_line_sync('git -C /home/arkan/ferrari-ubuntu status -s');
+        if (ok) {
+          const str = new TextDecoder().decode(out).trim();
+          const lines = str ? str.split('\n').length : 0;
+          this._cmdOutput = lines === 0 ? 'GIT: BERSIH (MAIN)' : `GIT: ${lines} FILE BERUBAH`;
+        }
+      } catch (e) {
+        this._cmdOutput = 'GIT: GAGAL CEK';
+      }
+    } else if (cmdType === 'ip') {
+      try {
+        const [ok, out] = GLib.spawn_command_line_sync('hostname -I');
+        if (ok) {
+          const ip = new TextDecoder().decode(out).trim().split(' ')[0];
+          this._cmdOutput = `IP: ${ip || '127.0.0.1'}`;
+        }
+      } catch (e) {
+        this._cmdOutput = 'IP: TIDAK TERSEDIA';
+      }
+    } else if (cmdType === 'audio') {
+      try {
+        GLib.spawn_command_line_async('systemctl --user restart pipewire-pulse');
+        this._cmdOutput = 'PW-RST: PIPEWIRE DI-RESTART';
+      } catch (e) {
+        this._cmdOutput = 'PW-RST: GAGAL';
+      }
+    }
+    this._fillCmd();
+  }
+
+  _fillCmd() {
+    this._cmdTitle.set_text('PIT COMMAND BAR');
+    this._cmdSub.set_text(this._cmdOutput);
+  }
+
+  _fillRadio() {
+    let appName = 'OFFLINE';
+    let isMuted = false;
+    if (this._mixer) {
+      const src = this._mixer.get_default_source();
+      if (src)
+        isMuted = src.get_is_muted();
+      const s = this._recorder();
+      if (s)
+        appName = this._micApp(s);
+    }
+    this._radioTitle.set_text(`RADIO PIT WALL · ${appName}`);
+    this._radioSub.set_text(isMuted ? '● MUTED (TRANSMISI MATI)' : `● TRANSMITTING (${mmss(this._radioDuration)})`);
+    if (this._radioMuteLabel)
+      this._radioMuteLabel.set_text(isMuted ? 'UNMUTE' : 'MUTE');
+    if (this._radioMuteBtn) {
+      if (isMuted)
+        this._radioMuteBtn.add_style_class_name('noir-island-radio-mute-btn--muted');
+      else
+        this._radioMuteBtn.remove_style_class_name('noir-island-radio-mute-btn--muted');
     }
   }
 
@@ -3561,6 +4055,20 @@ export class Island {
       this._fillTelemetry();
     if (this._timerRow && this._timerRow.visible)
       this._fillTimer();
+    if (this._dropRow && this._dropRow.visible)
+      this._fillDrop();
+    if (this._clipRow && this._clipRow.visible)
+      this._fillClip();
+    if (this._cmdRow && this._cmdRow.visible)
+      this._fillCmd();
+    if (this._radioRow && this._radioRow.visible) {
+      if (this._micOn)
+        this._radioDuration++;
+      else
+        this._radioDuration = 0;
+      this._fillRadio();
+    }
+    this._syncClip();
 
     // Jam mundur mulai jalan saat memang tidak ada isi. Celah 1 dtk antara trek
     // terakhir dan trek berikutnya tidak boleh membuat island kedip masuk-keluar.

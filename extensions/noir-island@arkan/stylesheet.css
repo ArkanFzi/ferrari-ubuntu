@@ -388,13 +388,13 @@
 
 /* Cockpit Switcher Nav Bar */
 .noir-island-nav-box {
-  spacing: 3px;
+  spacing: 2px;
   y-align: center;
 }
 
 .noir-island-nav-btn {
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 3px 5px;
+  border-radius: 5px;
   background-color: transparent;
   color: #777777;
 }
@@ -484,4 +484,137 @@
 
 .noir-island-btn--play:active {
   background-color: #9e1b11;
+}
+
+/* Rosso Notch Drop Shelf */
+.noir-island-drop-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(218, 41, 28, 0.15);
+  color: #da291c;
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.45);
+  margin-right: 10px;
+}
+
+.noir-island-drop-tile--active {
+  background-color: rgba(218, 41, 28, 0.35);
+  box-shadow: 0 0 10px rgba(218, 41, 28, 0.7);
+}
+
+.noir-island-drop-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.noir-island-drop-btn:hover {
+  background-color: rgba(218, 41, 28, 0.4);
+}
+
+/* Carbon Clipboard Stack */
+.noir-island-clip-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  margin-right: 10px;
+}
+
+.noir-island-clip-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  margin-right: 6px;
+}
+
+.noir-island-clip-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.noir-island-clip-btn:hover {
+  background-color: rgba(254, 211, 0, 0.25);
+  color: #fed300;
+}
+
+/* Pit Command Bar */
+.noir-island-cmd-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(0, 230, 118, 0.12);
+  color: #00e676;
+  box-shadow: inset 0 0 0 1px rgba(0, 230, 118, 0.35);
+  margin-right: 10px;
+}
+
+.noir-island-cmd-output {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #00e676;
+}
+
+.noir-island-cmd-btn {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.noir-island-cmd-btn:hover {
+  background-color: rgba(0, 230, 118, 0.3);
+  color: #00e676;
+}
+
+/* Team Radio Cockpit */
+.noir-island-radio-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(218, 41, 28, 0.18);
+  color: #da291c;
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.5);
+  margin-right: 10px;
+}
+
+.noir-island-radio-live {
+  font-family: Titillium Web;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fed300;
+  letter-spacing: 0.5px;
+}
+
+.noir-island-radio-mute-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: rgba(218, 41, 28, 0.25);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.6);
+}
+
+.noir-island-radio-mute-btn:hover {
+  background-color: #da291c;
+}
+
+.noir-island-radio-mute-btn--muted {
+  background-color: #555555;
+  color: #aaaaaa;
+  box-shadow: none;
 }
