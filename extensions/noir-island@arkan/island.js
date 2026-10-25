@@ -338,10 +338,24 @@ export class Island {
     Main.layoutManager.addChrome(this._island, {affectsInputRegion: false});
     this._active = false;
     this._island.visible = false;
+
+    this._railLeft = new St.Widget({
+      style_class: 'noir-island-horizon-rail',
+      reactive: false,
+    });
+    this._railRight = new St.Widget({
+      style_class: 'noir-island-horizon-rail',
+      reactive: false,
+    });
+    Main.layoutManager.addChrome(this._railLeft, {affectsInputRegion: false, trackFullscreen: true});
+    Main.layoutManager.addChrome(this._railRight, {affectsInputRegion: false, trackFullscreen: true});
+
     this._place();
 
     this._on(global.display, 'in-fullscreen-changed', () => {
       this._fullscreen = !!Main.layoutManager.primaryMonitor?.inFullscreen;
+      if (this._railLeft && this._railRight)
+        this._syncHorizonRail(this._stowed || !this._island?.visible ? 0 : (this._island.width || PILL_W), this._island?.x || 0);
       this._render();
     });
     this._on(Main.layoutManager, 'monitors-changed', () => this._relayout());
@@ -481,6 +495,16 @@ export class Island {
       this._bloomTimerId = 0;
     }
 
+    if (this._railLeft) {
+      Main.layoutManager.removeChrome(this._railLeft);
+      this._railLeft.destroy();
+      this._railLeft = null;
+    }
+    if (this._railRight) {
+      Main.layoutManager.removeChrome(this._railRight);
+      this._railRight.destroy();
+      this._railRight = null;
+    }
     if (this._island) {
       Main.layoutManager.removeChrome(this._island);
       this._island.destroy();
@@ -1801,6 +1825,49 @@ export class Island {
       return;
     const [x, y] = this._anchor(this._island.width || PILL_W);
     this._island.set_position(x, y);
+    if (this._railLeft && this._railRight) {
+      if (this._stowed || !this._island.visible)
+        this._syncHorizonRail(0, 0);
+      else
+        this._syncHorizonRail(this._island.width || PILL_W, x);
+    }
+  }
+
+  _syncHorizonRail(w, x) {
+    const mon = this._monitor();
+    if (!mon || !this._railLeft || !this._railRight)
+      return;
+    const panelH = Math.round(Main.panel.height || 0);
+    const y = Math.round(mon.y + panelH);
+    const railH = 2;
+
+    if (this._fullscreen) {
+      this._railLeft.visible = false;
+      this._railRight.visible = false;
+      return;
+    }
+
+    if (this._stowed || w <= 0) {
+      // Island sedang stowed / terlipat: garis merah utuh 100% selebar monitor
+      this._railLeft.set_position(mon.x, y);
+      this._railLeft.set_size(mon.width, railH);
+      this._railLeft.visible = true;
+      this._railRight.visible = false;
+      return;
+    }
+
+    // Island aktif: pisahkan sayap kiri dan kanan mengikuti posisi island
+    const leftW = Math.max(0, x - mon.x);
+    const rightX = Math.round(x + w);
+    const rightW = Math.max(0, (mon.x + mon.width) - rightX);
+
+    this._railLeft.set_position(mon.x, y);
+    this._railLeft.set_size(leftW, railH);
+    this._railLeft.visible = leftW > 0;
+
+    this._railRight.set_position(rightX, y);
+    this._railRight.set_size(rightW, railH);
+    this._railRight.visible = rightW > 0;
   }
 
   // Lebar card bergantung pada monitor, tingginya pada posisi panel. Keduanya
@@ -2039,6 +2106,7 @@ export class Island {
     for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._telemetryRow, this._timerRow, this._dropRow, this._clipRow, this._cmdRow, this._radioRow, this._radarRow, this._ignitionRow, this._progress])
       if (row) row.visible = false;
     const [x, y] = this._anchor(this._island.width);
+    this._syncHorizonRail(0, 0);
     this._island.ease({
       height: 0,
       x,
@@ -2069,6 +2137,7 @@ export class Island {
     island.set_opacity(255);
     island.set_size(w, h);
     island.set_position(x, y);
+    this._syncHorizonRail(w, x);
     log('noir-island: unhide');
   }
 
@@ -2112,12 +2181,14 @@ export class Island {
         const [curX, curY] = this._anchor(curW);
         this._island.set_size(curW, curH);
         this._island.set_position(curX, curY);
+        this._syncHorizonRail(curW, curX);
         const pw = Math.max(0, curW - 2 * PROG_INSET);
         this._progress.set_size(pw, PROGRESS_H);
         if (p >= 1) {
           this._bloomTimerId = 0;
           this._island.set_size(w, h);
           this._island.set_position(x, y);
+          this._syncHorizonRail(w, x);
           this._progress.set_size(this._progW, PROGRESS_H);
           return GLib.SOURCE_REMOVE;
         }
@@ -2126,6 +2197,7 @@ export class Island {
     } else {
       this._island.set_size(w, h);
       this._island.set_position(x, y);
+      this._syncHorizonRail(w, x);
       this._progress.set_size(this._progW, PROGRESS_H);
     }
 
@@ -3770,6 +3842,19 @@ export class Island {
         this._lyricEqBars[0].ease({ height: lb0, duration: TICK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
         this._lyricEqBars[1].ease({ height: lb1, duration: TICK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
         this._lyricEqBars[2].ease({ height: lb2, duration: TICK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+      }
+    }
+
+    // 3. Audio-Reactive Breathing Pulse pada Horizon Rail
+    if (this._railLeft && this._railRight) {
+      if (!playing) {
+        this._railLeft.set_opacity(255);
+        this._railRight.set_opacity(255);
+      } else {
+        const beat = Math.pow(Math.abs(Math.sin(cur * Math.PI * 2)), 2);
+        const pulse = Math.round((0.80 + 0.20 * beat * vol) * 255);
+        this._railLeft.set_opacity(pulse);
+        this._railRight.set_opacity(pulse);
       }
     }
   }

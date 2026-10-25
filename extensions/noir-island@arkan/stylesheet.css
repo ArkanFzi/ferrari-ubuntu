@@ -17,6 +17,13 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
 }
 
+/* F1 Horizon Telemetry Rail (Cockpit Horizon Line) */
+.noir-island-horizon-rail {
+  background-color: #da291c;
+  height: 2px;
+  box-shadow: 0 -1px 2px rgba(218, 41, 28, 0.45);
+}
+
 /* Padding horizontal hidup di baris, bukan di card, supaya rel progres dan rail
    rosso bisa menyentuh tepi card. */
 .noir-island-pad {
