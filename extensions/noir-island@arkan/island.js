@@ -2003,6 +2003,21 @@ export class Island {
     this._updateProgress(player);
     if (ganti) {
       this._rampTo(this._mediaRow, TULIS_OPACITY, 255, {dari: 0});
+    }
+
+    const lyricKey = `${m.title}|${m.artist}`;
+    if (lyricKey !== this._lyricsKey) {
+      this._lyricsKey = lyricKey;
+      this._currentLyrics = this._lyricsCache.get(lyricKey) || null;
+      if (this._mLyric) {
+        this._mLyric.visible = false;
+        this._mLyric.set_text('');
+      }
+    }
+    if (this._lyricsCache.has(lyricKey)) {
+      this._currentLyrics = this._lyricsCache.get(lyricKey);
+      this._updateLyrics(player);
+    } else if (this._lyricsFetching !== lyricKey) {
       this._fetchLyrics(player);
     }
   }
@@ -2191,7 +2206,7 @@ export class Island {
   }
 
   _fetchLyrics(player) {
-    const m = player.meta;
+    const m = player?.meta;
     if (!m || !m.title)
       return;
     const key = `${m.title}|${m.artist}`;
@@ -2204,8 +2219,10 @@ export class Island {
     if (this._lyricsFetching === key || !this._soupSession)
       return;
     this._lyricsFetching = key;
+    this._updateLyrics(player);
 
     const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(m.title)}&artist_name=${encodeURIComponent(m.artist || '')}&duration=${Math.round(m.length || 0)}`;
+    log(`noir-island: lirik cari "${m.title}" (${m.artist})`);
     try {
       const msg = Soup.Message.new('GET', url);
       msg.request_headers.append('User-Agent', 'noir-island/1.0 (https://github.com/arkan/noir-island)');
@@ -2218,16 +2235,35 @@ export class Island {
           if (data && data.syncedLyrics) {
             const parsed = this._parseLRC(data.syncedLyrics);
             this._lyricsCache.set(key, parsed);
-            if (this._shownKey === (m.key || `${m.title}|${m.artist}`)) {
+            log(`noir-island: lirik ok "${m.title}" -> ${parsed ? parsed.length : 0} baris`);
+            if (this._shownKey === (m.key || `${m.title}|${m.artist}`) ||
+                (player.meta && player.meta.title === m.title)) {
               this._currentLyrics = parsed;
+              this._lyricsKey = key;
+              this._updateLyrics(player);
+            }
+          } else if (data && data.instrumental) {
+            this._lyricsCache.set(key, 'INSTRUMENTAL');
+            log(`noir-island: lirik instrumental "${m.title}"`);
+            if (this._shownKey === (m.key || `${m.title}|${m.artist}`) ||
+                (player.meta && player.meta.title === m.title)) {
+              this._currentLyrics = 'INSTRUMENTAL';
               this._lyricsKey = key;
               this._updateLyrics(player);
             }
           } else {
             this._lyricsCache.set(key, null);
+            log(`noir-island: lirik nihil "${m.title}"`);
+            if (player.meta && player.meta.title === m.title) {
+              this._updateLyrics(player);
+            }
           }
         } catch (e) {
           this._lyricsCache.set(key, null);
+          log(`noir-island: lirik gagal "${m.title}": ${e}`);
+          if (player.meta && player.meta.title === m.title) {
+            this._updateLyrics(player);
+          }
         }
       });
     } catch (e) {
@@ -2246,9 +2282,11 @@ export class Island {
         const min = parseInt(match[1], 10);
         const sec = parseFloat(match[2]);
         const text = match[3].trim();
-        if (text) {
-          result.push({ t: min * 60 + sec, text });
-        }
+        result.push({
+          t: min * 60 + sec,
+          text: text || '♪ Interlude ♪',
+          isBreak: !text,
+        });
       }
     }
     result.sort((a, b) => a.t - b.t);
@@ -2258,7 +2296,11 @@ export class Island {
   _slideLyric(newText) {
     if (!this._mLyric)
       return;
+    const isMuted = newText.startsWith('♪') || newText.includes('...');
+    const styleClass = isMuted ? 'noir-island-lyric-muted' : 'noir-island-lyric-active';
+
     if (!this._mLyric.text || !this._mLyric.visible) {
+      this._mLyric.set_style_class_name(styleClass);
       this._mLyric.set_text(newText);
       this._mLyric.set_translation(0, 0, 0);
       this._mLyric.set_opacity(255);
@@ -2281,6 +2323,7 @@ export class Island {
       this._lyricTimerId = 0;
       if (!this._island || this._dead || !this._mLyric)
         return GLib.SOURCE_REMOVE;
+      this._mLyric.set_style_class_name(styleClass);
       this._mLyric.set_text(newText);
       this._mLyric.visible = true;
       this._fitText();
@@ -2292,16 +2335,48 @@ export class Island {
   }
 
   _updateLyrics(player, elapsed) {
-    if (!this._mLyric || !this._currentLyrics || this._currentLyrics.length === 0) {
+    if (!this._mLyric || !player?.meta?.title) {
       if (this._mLyric && this._mLyric.visible) {
         this._mLyric.visible = false;
         this._fitText();
       }
       return;
     }
+
+    const m = player.meta;
+    const key = `${m.title}|${m.artist}`;
+
+    // Sedang fetching lirik ke LRCLIB
+    if (this._lyricsFetching === key) {
+      this._slideLyric('Memuat lirik...');
+      return;
+    }
+
+    // Lagu instrumental
+    if (this._currentLyrics === 'INSTRUMENTAL') {
+      this._slideLyric('♪ Instrumental ♪');
+      return;
+    }
+
+    // Lirik tidak ditemukan / kosong
+    if (!this._currentLyrics || !Array.isArray(this._currentLyrics) || this._currentLyrics.length === 0) {
+      if (this._mLyric.visible) {
+        this._mLyric.visible = false;
+        this._fitText();
+      }
+      return;
+    }
+
     const cur = elapsed ?? (player.status === 'Playing'
       ? player.pos + player.rate * (monoMs() - player.posAt) / 1000
       : player.pos);
+
+    // Intro: waktu sebelum lirik pertama dimulai
+    if (cur < this._currentLyrics[0].t) {
+      this._slideLyric('♪ Intro ♪');
+      return;
+    }
+
     let active = null;
     for (let i = 0; i < this._currentLyrics.length; i++) {
       if (cur >= this._currentLyrics[i].t) {
