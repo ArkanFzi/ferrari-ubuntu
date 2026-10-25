@@ -387,6 +387,21 @@
 }
 
 /* Cockpit Switcher Nav Bar */
+.noir-island-nav-container {
+  vertical: true;
+  spacing: 2px;
+  y-align: center;
+}
+
+.noir-island-nav-hint {
+  font-family: Titillium Web;
+  font-size: 8px;
+  font-weight: 700;
+  color: #fed300;
+  letter-spacing: 0.5px;
+  x-align: center;
+}
+
 .noir-island-nav-box {
   spacing: 2px;
   y-align: center;
@@ -400,14 +415,84 @@
 }
 
 .noir-island-nav-btn:hover {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
 
 .noir-island-nav-btn--active {
-  background-color: rgba(218, 41, 28, 0.25);
-  color: #fed300;
-  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.6);
+  background-color: rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+/* Color-Coded Manettino Classes */
+.noir-island-nav-btn--media { color: #da291c; }
+.noir-island-nav-btn--media:hover, .noir-island-nav-btn--media.noir-island-nav-btn--active {
+  background-color: rgba(218, 41, 28, 0.3);
+  color: #ff4d40;
+  box-shadow: inset 0 0 0 1px #da291c;
+}
+
+.noir-island-nav-btn--telemetry { color: #fed300; }
+.noir-island-nav-btn--telemetry:hover, .noir-island-nav-btn--telemetry.noir-island-nav-btn--active {
+  background-color: rgba(254, 211, 0, 0.3);
+  color: #ffee55;
+  box-shadow: inset 0 0 0 1px #fed300;
+}
+
+.noir-island-nav-btn--timer { color: #ff7700; }
+.noir-island-nav-btn--timer:hover, .noir-island-nav-btn--timer.noir-island-nav-btn--active {
+  background-color: rgba(255, 119, 0, 0.3);
+  color: #ffa34d;
+  box-shadow: inset 0 0 0 1px #ff7700;
+}
+
+.noir-island-nav-btn--radar { color: #00e676; }
+.noir-island-nav-btn--radar:hover, .noir-island-nav-btn--radar.noir-island-nav-btn--active {
+  background-color: rgba(0, 230, 118, 0.3);
+  color: #69f0ae;
+  box-shadow: inset 0 0 0 1px #00e676;
+}
+
+.noir-island-nav-btn--drop { color: #ffb300; }
+.noir-island-nav-btn--drop:hover, .noir-island-nav-btn--drop.noir-island-nav-btn--active {
+  background-color: rgba(255, 179, 0, 0.3);
+  color: #ffe082;
+  box-shadow: inset 0 0 0 1px #ffb300;
+}
+
+.noir-island-nav-btn--clip { color: #e0e0e0; }
+.noir-island-nav-btn--clip:hover, .noir-island-nav-btn--clip.noir-island-nav-btn--active {
+  background-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #ffffff;
+}
+
+.noir-island-nav-btn--cmd { color: #00f5d4; }
+.noir-island-nav-btn--cmd:hover, .noir-island-nav-btn--cmd.noir-island-nav-btn--active {
+  background-color: rgba(0, 245, 212, 0.3);
+  color: #70fff0;
+  box-shadow: inset 0 0 0 1px #00f5d4;
+}
+
+.noir-island-nav-btn--radio { color: #f72585; }
+.noir-island-nav-btn--radio:hover, .noir-island-nav-btn--radio.noir-island-nav-btn--active {
+  background-color: rgba(247, 37, 133, 0.3);
+  color: #ff70a6;
+  box-shadow: inset 0 0 0 1px #f72585;
+}
+
+.noir-island-nav-btn--ignition { color: #ffee32; }
+.noir-island-nav-btn--ignition:hover, .noir-island-nav-btn--ignition.noir-island-nav-btn--active {
+  background-color: rgba(255, 238, 50, 0.3);
+  color: #ffff88;
+  box-shadow: inset 0 0 0 1px #ffee32;
+}
+
+.noir-island-nav-btn--weather { color: #00b4d8; }
+.noir-island-nav-btn--weather:hover, .noir-island-nav-btn--weather.noir-island-nav-btn--active {
+  background-color: rgba(0, 180, 216, 0.3);
+  color: #90e0ef;
+  box-shadow: inset 0 0 0 1px #00b4d8;
 }
 
 /* F1 Telemetry Card */

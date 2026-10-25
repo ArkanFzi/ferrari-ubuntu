@@ -515,10 +515,28 @@ export class Island {
     const island = new St.BoxLayout({
       style_class: 'noir-island',
       vertical: true,
-      reactive: false,
+      reactive: true,
     });
     island.set_size(PILL_W, PILL_H);
     this._island = island;
+    island.connect('scroll-event', (actor, event) => {
+      const dir = event.get_scroll_direction();
+      let step = 0;
+      if (dir === Clutter.ScrollDirection.UP || dir === Clutter.ScrollDirection.LEFT)
+        step = -1;
+      else if (dir === Clutter.ScrollDirection.DOWN || dir === Clutter.ScrollDirection.RIGHT)
+        step = 1;
+      else if (dir === Clutter.ScrollDirection.SMOOTH) {
+        const [, dy] = event.get_scroll_delta();
+        if (dy < -0.1) step = -1;
+        else if (dy > 0.1) step = 1;
+      }
+      if (step !== 0) {
+        this._stepNavMode(step);
+        return Clutter.EVENT_STOP;
+      }
+      return Clutter.EVENT_PROPAGATE;
+    });
 
     // Pill: keadaan diam, dan keadaan jeda (track terakhir masih terbaca di bus).
     // y_expand membuat baris mengambil seluruh tinggi card. Tanpa itu BoxLayout
@@ -1546,26 +1564,54 @@ export class Island {
     } catch (_) {}
   }
 
+  _stepNavMode(delta) {
+    const modes = [
+      'media', 'telemetry', 'timer', 'radar', 'drop',
+      'clip', 'cmd', 'radio', 'ignition', 'weather',
+    ];
+    let cur = this._cardMode || (this._state === 'media' ? 'media' : 'telemetry');
+    let idx = modes.indexOf(cur);
+    if (idx === -1) idx = 0;
+    let nextIdx = (idx + delta + modes.length) % modes.length;
+    this._cardMode = modes[nextIdx];
+    this._cardOpen = true;
+    this._playSfx('click');
+    this._wake();
+    this._render();
+  }
+
   _navBox(currentMode) {
+    const container = new St.BoxLayout({
+      style_class: 'noir-island-nav-container',
+      vertical: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const hintLabel = new St.Label({
+      style_class: 'noir-island-nav-hint',
+      text: '',
+    });
+    this._noEllipsis(hintLabel);
+
     const box = new St.BoxLayout({
       style_class: 'noir-island-nav-box',
       y_align: Clutter.ActorAlign.CENTER,
     });
     const items = [
-      { id: 'media', icon: 'audio-x-generic-symbolic' },
-      { id: 'telemetry', icon: 'utilities-system-monitor-symbolic' },
-      { id: 'timer', icon: 'preferences-system-time-symbolic' },
-      { id: 'radar', icon: 'find-location-symbolic' },
-      { id: 'drop', icon: 'folder-download-symbolic' },
-      { id: 'clip', icon: 'edit-copy-symbolic' },
-      { id: 'cmd', icon: 'utilities-terminal-symbolic' },
-      { id: 'radio', icon: 'audio-input-microphone-symbolic' },
-      { id: 'ignition', icon: 'security-high-symbolic' },
-      { id: 'weather', icon: 'weather-clear-symbolic' },
+      { id: 'media', icon: 'audio-x-generic-symbolic', label: 'MEDIA PLAYER' },
+      { id: 'telemetry', icon: 'utilities-system-monitor-symbolic', label: 'TELEMETRI F1' },
+      { id: 'timer', icon: 'preferences-system-time-symbolic', label: 'CHRONOGRAPH' },
+      { id: 'radar', icon: 'find-location-symbolic', label: 'RADAR MONZA' },
+      { id: 'drop', icon: 'folder-download-symbolic', label: 'NOTCH DROP' },
+      { id: 'clip', icon: 'edit-copy-symbolic', label: 'PAPAN KLIP' },
+      { id: 'cmd', icon: 'utilities-terminal-symbolic', label: 'COMMAND BAR' },
+      { id: 'radio', icon: 'audio-input-microphone-symbolic', label: 'TEAM RADIO' },
+      { id: 'ignition', icon: 'security-high-symbolic', label: 'SECURITY HUD' },
+      { id: 'weather', icon: 'weather-clear-symbolic', label: 'METEO RACING' },
     ];
     for (const item of items) {
+      const isActive = item.id === currentMode;
       const btn = new St.Button({
-        style_class: `noir-island-nav-btn ${item.id === currentMode ? 'noir-island-nav-btn--active' : ''}`,
+        style_class: `noir-island-nav-btn noir-island-nav-btn--${item.id} ${isActive ? 'noir-island-nav-btn--active' : ''}`,
         can_focus: false,
       });
       const icon = new St.Icon({
@@ -1573,6 +1619,12 @@ export class Island {
         icon_size: 11,
       });
       btn.set_child(icon);
+      btn.connect('enter-event', () => {
+        hintLabel.set_text(item.label);
+      });
+      btn.connect('leave-event', () => {
+        hintLabel.set_text('');
+      });
       btn.connect('clicked', () => {
         this._playSfx('click');
         this._cardMode = item.id;
@@ -1582,7 +1634,9 @@ export class Island {
       });
       box.add_child(btn);
     }
-    return box;
+    container.add_child(hintLabel);
+    container.add_child(box);
+    return container;
   }
 
   _hairline() {
