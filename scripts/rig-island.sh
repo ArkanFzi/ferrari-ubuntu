@@ -568,6 +568,12 @@ tunggu_baru() {
 # Tulis settings lewat saluran kontrol di dalam sesi rig (lihat run.sh). Nilai
 # balik gsettings tidak bisa dipercaya di lingkungan ini, jadi tiap rigctl
 # disambut tunggu_baru pada baris log island: log itu yang jadi buktinya.
+#
+# Pembaca FIFO menjalankan eval, jadi nilai yang membawa kutip harus ditulis
+# DENGAN kutipnya di dalam satu argumen: rigctl 'gsettings set ... key "nilai"'.
+# Bentuk rigctl gsettings set ... key "nilai" kehilangan kutipnya di pemanggil
+# (printf "$*") dan gsettings menerima -6.2,106.8 apa adanya — terukur nilai itu
+# mendarat sebagai "6", bukan sebagai koordinat.
 rigctl() { printf '%s\n' "$*" > "$RIG/ctl"; }
 # Badge yang sedang dilukis, diukur dengan membangunkan pil tanpa mengirim apa
 # pun. Yang dipakai tes adalah SELISIHnya: record yang tidak pernah tampil (DND,
@@ -1075,6 +1081,120 @@ if tunggu_baru ' idle pill ' $C1 16; then
   esac
 else
   check R7D-SAKELAR GAGAL "tidak ada baris idle pill untuk diperiksa: $(baris_terakhir)"
+fi
+
+# -------------------------------------------------------------------- R8 cuaca
+# Satu-satunya tenant yang keluar mesin, jadi bagian yang tidak butuh jaringan
+# dipisah dari bagian yang-butuh.
+#
+# R8A menguji GERBANGNYA dan itu tidak menyentuh met.no sama sekali: dengan
+# weather-location bawaan kosong, tenant tidak boleh dibangun. Yang dituntut
+# adalah keadaan log yang tidak mungkin muncul dari jalur lain — nol "cuaca
+# kota=", nol data, dan minimal satu "cuaca tanpa lokasi" dari enable(). R2C
+# sudah menjaga sisi lukisnya: slot ambient tetap '-' padahal sakelar cuaca
+# defaultnya nyala.
+say "R8 cuaca tenant"
+WAKOTA=$(grep -ac 'noir-island: cuaca kota=' "$RIG/shell.out")
+WADATA=$(grep -ac 'noir-island: cuaca ->' "$RIG/shell.out")
+WATANPA=$(grep -ac 'noir-island: cuaca tanpa lokasi' "$RIG/shell.out")
+if [ "$WAKOTA" = 0 ] && [ "$WADATA" = 0 ] && [ "$WATANPA" -ge 1 ]; then
+  check R8A-TANPA-LOKASI OK
+else
+  check R8A-TANPA-LOKASI GAGAL "lokasi kosong tapi tenant jalan: kota=$WAKOTA data=$WADATA tanpaLokasi=$WATANPA"
+fi
+
+# Lokasi diisi lewat jalur perubahan setting, bukan lewat boot. Kalau perubahannya
+# tidak membangunkan tenant, tidak ada satu pun baris "cuaca kota=" dan seluruh
+# tes di bawah ikut merah dengan sebab yang terbaca.
+parkir
+tidur_island || echo "  (sebelum R8B island belum tidur: $(baris_terakhir))"
+WB=$(titik)
+rigctl 'gsettings set org.gnome.shell.extensions.noir-island weather-location "-6.2,106.8"'
+if tunggu_baru 'noir-island: cuaca kota=' $WB 16; then
+  check R8B-MULAI OK
+else
+  check R8B-MULAI GAGAL "ganti lokasi tidak membangun tenant: $(baris_terakhir)"
+fi
+
+# Satu permintaan nyata. Fetch dingin ke met.no terukur 0.8-1.3 dtk di mesin
+# ini; 40 dtk memberi tempat untuk DNS/TLS yang lambat tanpa menutupi kabel
+# yang benar-benar putus.
+if tunggu_baru 'noir-island: cuaca ->' $WB 80; then
+  WLABEL=$(grep -a 'noir-island: cuaca ->' "$RIG/shell.out" | tail -1 \
+    | sed -n 's/.*cuaca -> "\(.*\)".*/\1/p')
+  KETEMU=0
+  for i in $(seq 6); do
+    T0=$(titik)
+    xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+    tunggu_baru ' idle pill ' $T0 8 || true
+    case "$(baris_terakhir)" in
+      *"ambient=weather:$WLABEL"*) KETEMU=1; break ;;
+    esac
+    parkir; sleep 0.7
+  done
+  if [ "$KETEMU" = "1" ]; then
+    check R8C-TEKS OK
+    shot "$RIG/shots/cuaca.png"
+    read -r PW PH PX PY _ <<<"$(geo)"
+    AC=$(terang "$RIG/shots/cuaca.png" $((PX + 8)) $((PY + 4)) $((PX + PW - 8)) $((PY + PH - 2)))
+    if [ "${AC:-0}" -ge 40 ]; then
+      check R8C-TERANG OK
+    else
+      check R8C-TERANG GAGAL "pil cuaca hanya ${AC:-0} px terang di ${PX},${PY} ${PW}x${PH}"
+    fi
+  else
+    check R8C-TEKS GAGAL "data mendarat (label \"$WLABEL\") tapi pil tidak melukisnya: $(baris_terakhir)"
+    check R8C-TERANG GAGAL "ikut mati bersama R8C-TEKS"
+  fi
+else
+  WGAGAL=$(grep -a 'noir-island: cuaca gagal' "$RIG/shell.out" | tail -1)
+  check R8C-TEKS GAGAL "met.no tidak menjawab dalam 40 dtk; ${WGAGAL:-tidak ada baris gagal sama sekali}"
+  check R8C-TERANG GAGAL "ikut mati bersama R8C-TEKS"
+fi
+
+# Sakelar mati dengan DATA yang masih di tangan: Info-nya valid, lokasinya masih
+# terisi, jadi yang diuji benar-benar keputusan _providers()/enabled(), bukan
+# kosongnya sumber.
+parkir
+tidur_island || echo "  (sebelum R8D island belum tidur: $(baris_terakhir))"
+WC1=$(titik)
+rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-weather false
+sleep 1.0
+xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+if tunggu_baru ' idle pill ' $WC1 16; then
+  BARIS=$(baris_terakhir)
+  case "$BARIS" in
+    *ambient=weather*) check R8D-SAKELAR GAGAL "ambient-weather=false masih melukis cuaca: $BARIS" ;;
+    *) check R8D-SAKELAR OK ;;
+  esac
+else
+  check R8D-SAKELAR GAGAL "tidak ada baris idle pill untuk diperiksa: $(baris_terakhir)"
+fi
+
+# Sakelar dinyalakan lagi, lalu lokasi DIBUANG. R8A menguji keadaan kosong dari
+# boot; yang di sini adalah PERPINDAHAN ke keadaan itu: Info lama harus dibuang
+# dan labelnya ikut turun, tidak boleh mengendap di pil sampai refresh berikutnya.
+rigctl gsettings set org.gnome.shell.extensions.noir-island ambient-weather true
+sleep 1.0
+WD1=$(titik)
+rigctl 'gsettings set org.gnome.shell.extensions.noir-island weather-location ""'
+if tunggu_baru 'noir-island: cuaca tanpa lokasi' $WD1 16; then
+  check R8E-LOKASI-DIBUANG OK
+else
+  check R8E-LOKASI-DIBUANG GAGAL "lokasi dikosongkan tapi tenant tidak pindah: $(baris_terakhir)"
+fi
+parkir
+tidur_island || echo "  (sebelum R8F island belum tidur: $(baris_terakhir))"
+WF=$(titik)
+xdotool mousemove $CUT $((POKOK + 20)); sleep 0.6
+if tunggu_baru ' idle pill ' $WF 16; then
+  BARIS=$(baris_terakhir)
+  case "$BARIS" in
+    *ambient=weather*) check R8F-TIDAK-MENGENDAP GAGAL "label cuaca lama masih menempel setelah lokasi dibuang: $BARIS" ;;
+    *) check R8F-TIDAK-MENGENDAP OK ;;
+  esac
+else
+  check R8F-TIDAK-MENGENDAP GAGAL "tidak ada baris idle pill untuk diperiksa: $(baris_terakhir)"
 fi
 
 # Hanya error dari jalur noir-island yang dihitung: DING mengeluh soal ~/Desktop

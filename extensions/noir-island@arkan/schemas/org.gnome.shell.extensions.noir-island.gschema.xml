@@ -94,5 +94,26 @@
         Kalender kosong = tidak ada yang dikatakan. Mati = pil diam soal
         agenda.</description>
     </key>
+    <key name="ambient-weather" type="b">
+      <default>true</default>
+      <summary>Cuaca boleh mengisi slot ambient</summary>
+      <description>Pil menampilkan suhu dan kondisi sekarang untuk lokasi di
+        kunci weather-location, misalnya "26° Light rain". Sumbernya GWeather
+        dengan provider Meteorological Institute Norway (met.no) — satu-satunya
+        yang menjawab tanpa API key. Sama seperti agenda, cuaca tidak pernah
+        membangunkan island. Sakelar ini tidak mengirim permintaan jaringan apa
+        pun selama weather-location masih kosong.</description>
+    </key>
+    <key name="weather-location" type="s">
+      <default>''</default>
+      <summary>Lokasi cuaca: "lat,lon"</summary>
+      <description>Koordinat titik desimal, dipisah koma, contoh Jakarta
+        "-6.2,106.8". Kota terdekat yang dipakai (find_nearest_city), jadi
+        koordinat yang agak meleset tetap mendarat di kota yang benar. Kosong
+        berarti tenant cuaca tidak pernah dibangun: nol koneksi, nol timer, nol
+        biaya. Nilai ini berubah memicu ulang tenant, termasuk membuang data
+        lama. Tidak ada alamat atau nama kota di sini karena libgweather tidak
+        punya pencarian nama tanpa jaringan.</description>
+    </key>
   </schema>
 </schemalist>

@@ -7,6 +7,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gvc from 'gi://Gvc';
+import GWeather from 'gi://GWeather';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
@@ -37,6 +38,21 @@ const CAL_AHEAD_S = 35 * 86400;
 // timeout MPRIS 400 dtk terlalu ketat: gagal di sini cuma berarti dicoba lagi
 // lewat celah menit berikutnya.
 const CAL_ASK_TIMEOUT_MS = 2000;
+
+// Cuaca lewat GWeather 4 — pustaka yang sama yang dipakai menu tanggal shell
+// (gnome-shell Depends: gir1.2-gweather-4.0), jadi typelibnya pasti ada di
+// dalam proses. Mana yang benar-benar menjawab di mesin ini terukur, bukan
+// ditebak: MET_NO = data (Jakarta, 1.06 dtk, 26.1 C), OWM = "401 Unauthorized"
+// (butuh API key), METAR untuk lokasi kota = "Retrieval failed". Karena itu
+// hanya MET_NO yang diaktifkan; dua provider mati itu hanya menambah 600-900 dtk
+// per siklus tanpa pernah ikut berkontribusi.
+const WEATHER_PROVIDERS = GWeather.Provider.MET_NO;
+// Ambang umur DATA, bukan umur panggilan (10 menit, mengikuti weather.js shell).
+// Respons met.no membawa `expires` ±31 menit, jadi di bawah ambang ini update()
+// dijawab cache dalam proses: terukur 4-250 ms dan NOL koneksi TLS untuk tiga
+// panggilan beruntun.
+const WEATHER_STALE_S = 600;
+const WEATHER_TICKS = 120;
 
 // Island menggantung rata di bawah panel: tanpa celah, sudut atas kotak, jadi
 // ia dibaca sebagai bagian dari bezel, bukan sebagai toast. Padding horizontal
@@ -90,6 +106,7 @@ const OPT = {
   'ambient-clock': 'ambientClock',
   'ambient-mic': 'ambientMic',
   'ambient-agenda': 'ambientAgenda',
+  'ambient-weather': 'ambientWeather',
 };
 // Hover dibaca lewat polling global.get_pointer(), bukan captured-event MOTION
 // (di X11 tidak terkirim ke stage saat klien memegang pointer grab, jadi mati
@@ -215,6 +232,11 @@ export class Island {
     this._agendaProxy = null;
     this._agendaAsked = false;
     this._agendaEvery = 0;
+    // Info cuaca ikut dilepas saat disable(): dia satu-satunya tenant yang
+    // memegang koneksi keluar, dan labelnya tidak boleh naik ke sesi berikutnya.
+    this._weatherInfo = null;
+    this._weatherLabel = '';
+    this._weatherEvery = 0;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -242,6 +264,11 @@ export class Island {
     this._opt = {};
     for (const key of Object.keys(OPT))
       this._on(this._settings, `changed::${key}`, () => this._syncOpts());
+    // Lokasi cuaca bukan opsi render, tapi tombol mulai ulang tenant: string
+    // "lat,lon" yang berubah berarti Info lama harus dibuang dan yang baru
+    // dibangun, bukan sekadar dibaca ulang di lukisan berikutnya.
+    this._on(this._settings, 'changed::weather-location',
+      () => this._startWeather());
     this._syncOpts();
 
     this._notifSettings = new Gio.Settings({
@@ -274,6 +301,7 @@ export class Island {
     this._startMpris();
     this._startMic();
     this._startAgenda();
+    this._startWeather();
     this._fullscreen = !!Main.layoutManager.primaryMonitor?.inFullscreen;
     this._tickId = GLib.timeout_add(GLib.PRIORITY_LOW, TICK_MS, () => {
       this._tick();
@@ -362,6 +390,18 @@ export class Island {
     this._agenda.clear();
     this._agendaLabel = '';
     this._agendaAsked = false;
+
+    // Info cuaca dihentikan sebelum dilepas: abort() memutuskan permintaan yang
+    // masih di udara, run_dispose() menutup Soup.Session milik objek itu. Tanpa
+    // abort() island bisa meninggalkan satu request met.no yang baru selesai
+    // sesudah disable dan memanggil _syncWeather() di atas objek yang sudah
+    // tidak dipakai lagi.
+    if (this._weatherInfo) {
+      this._weatherInfo.abort();
+      this._weatherInfo.run_dispose();
+      this._weatherInfo = null;
+    }
+    this._weatherLabel = '';
 
     if (this._island) {
       Main.layoutManager.removeChrome(this._island);
@@ -1140,6 +1180,16 @@ export class Island {
         nilai: () => this._agendaLabel,
       },
       {
+        id: 'weather',
+        enabled: () => this._opt.ambientWeather,
+        kicker: () => false,
+        // "26° Light rain": angka + kondisi, tanpa nama kota. Ringkasan milik
+        // libgweather selalu diawali "Jakarta: ", dan kota adalah satu-satunya
+        // bagian yang sudah pasti diketahui user — di pil 240 px ia hanya
+        // memakan tempat yang lebih berguna untuk suhunya.
+        nilai: () => this._weatherLabel,
+      },
+      {
         id: 'clock',
         enabled: () => this._opt.ambientClock,
         kicker: () => true,
@@ -1354,6 +1404,136 @@ export class Island {
     const awal = hari <= 0 ? '' : hari === 1 ? 'BSK ' : `${mulai.format('%d/%m')} `;
     const jam = seharian ? '' : `${mulai.format('%H:%M')} `;
     return `${awal}${jam}${e.ringkas}`.trim();
+  }
+
+  // -------------------------------------------------------------------- cuaca
+  // Tenant cuaca. try/catch-nya wajib seperti dua tenant sebelumnya, dan dia
+  // menambah satu keadaan yang harganya harus NOL: lokasi belum diisi. Itulah
+  // kenapa Info tidak pernah dibangun sebelum ada koordinat — terukur,
+  // update() tanpa lokasi kembali dalam 0 dtk, tidak pernah menurunkan
+  // 'updated', dan tidak menyentuh jaringan sama sekali.
+  _startWeather() {
+    if (this._weatherInfo) {
+      this._weatherInfo.abort();
+      this._weatherInfo.run_dispose();
+      this._weatherInfo = null;
+    }
+    this._weatherLabel = '';
+    const [teks, city] = this._weatherLoc();
+    if (!teks) {
+      log('noir-island: cuaca tanpa lokasi');
+      this._render();
+      return;
+    }
+    if (!city) {
+      log(`noir-island: cuaca lokasi tidak sah: "${teks}"`);
+      this._render();
+      return;
+    }
+    try {
+      this._weatherInfo = new GWeather.Info({
+        application_id: 'noir.island.Weather',
+        contact_info: 'noir-island@arkan (extension GNOME Shell, mesin lokal)',
+        enabled_providers: WEATHER_PROVIDERS,
+      });
+      this._weatherInfo.set_location(city);
+      this._on(this._weatherInfo, 'updated', () => this._syncWeather());
+      log(`noir-island: cuaca kota=${city.get_city_name()} ${teks}`);
+      this._refreshWeather();
+    } catch (e) {
+      this._weatherInfo = null;
+      log(`noir-island: cuaca mati: ${e.message}`);
+      this._render();
+    }
+  }
+
+  // "lat,lon" adalah satu-satunya format yang harus dihafal. Bentuk serian
+  // milik shell (org.gnome.shell.weather locations, av dari "(uv)") sengaja
+  // tidak dipakai: isinya opaque, tidak stabil lintas versi libgweather, dan
+  // menguncinya berarti ikut membaca setting internal shell.
+  _weatherLoc() {
+    // get_string() di GJS 1.80 mengembalikan string BIASA, bukan [ok, nilai]:
+    // indeks [1] pada "-6.2,106.8" adalah karakter '6', dan rig membacanya sebagai
+    // lokasi tidak sah. Bentuk get_value().unpack() sama seperti _syncOpts().
+    const teks = String(this._settings.get_value('weather-location').unpack() ?? '').trim();
+    if (!teks)
+      return [teks, null];
+    const [lat, lon] = teks.split(',').map(x => parseFloat(x));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+        Math.abs(lat) > 90 || Math.abs(lon) > 180)
+      return [teks, null];
+    return [teks, GWeather.Location.get_world().find_nearest_city(lat, lon)];
+  }
+
+  // Yang dibatasi adalah umur DATA, bukan umur panggilan: ambang 10 menit di
+  // bawah kedaluwarsa met.no (±31 menit) berarti sebagian celah menit dijawab
+  // cache dalam proses. Saat fetch gagal, get_value_update() kembali false dan
+  // umurnya jadi -1 — itu pintu retry menit berikutnya, bukan jalan keluar.
+  // Tidak perlu flag "sedang di udara": tiga update() beruntun sebelum satu pun
+  // 'updated' terukur hanya menghasilkan satu connect(:443), jadi libgweather
+  // sudah menjaganya sendiri.
+  _refreshWeather() {
+    if (!this._weatherInfo)
+      return;
+    const [has, epoch] = this._weatherInfo.get_value_update();
+    const now = Math.floor(GLib.DateTime.new_now_local().to_unix());
+    if (has && now - epoch >= 0 && now - epoch < WEATHER_STALE_S)
+      return;
+    this._weatherInfo.update();
+  }
+
+  _syncWeather() {
+    const baru = this._weatherText();
+    // Dua kata kunci yang berbeda untuk dua hasil yang di layar terbaca sama:
+    // "cuaca ->" adalah data yang mendarat, "cuaca gagal" adalah jaringan/provider
+    // yang menolak. Rig menuntut yang pertama dan membedakan penyebabnya lewat
+    // yang kedua, tanpa perlu menebak dari panjang baris.
+    log(`noir-island: cuaca ${baru ? `-> "${baru}"` : `gagal (${this._weatherError()})`}`);
+    if (baru === this._weatherLabel)
+      return;
+    this._weatherLabel = baru;
+    // Tidak ada _wake() di sini: cuaca bukan peringatan. Dia hanya menggantikan
+    // tulisan pil ketika pil sudah bangun (doktrin TIER 29).
+    this._render();
+  }
+
+  _weatherError() {
+    const e = this._weatherInfo?.network_error();
+    if (e)
+      return e.message;
+    return String(this._weatherInfo?.get_weather_summary() ?? '') || 'tidak valid';
+  }
+
+  // Sumber angkanya penting: get_temp()/get_pressure()/get_wind() mengabaikan
+  // unit yang diminta dan mengikuti KONVENSI LOKASI (terukur: Jakarta menghasilkan
+  // "79.0 °F" dan "29.86 inHg"), dan schema org.gnome.system.units memang tidak
+  // ada di Ubuntu ini — jadi satu-satunya jalan keluar adalah memformat sendiri
+  // dari get_value_temp(CENTIGRADE). get_conditions()/get_value_conditions()
+  // juga terukur kosong untuk MET_NO (flags=0), sehingga nuansa hujan hanya ada
+  // di teks ringkasan — itu yang dipakai, dipotong dari depan "Jakarta: ".
+  _weatherText() {
+    const i = this._weatherInfo;
+    if (!i || !i.is_valid())
+      return '';
+    const [has, t] = i.get_value_temp(GWeather.TemperatureUnit.CENTIGRADE);
+    // Sky INVALID (-1, bukan 0) berarti MET_NO mengirim suhu jam ini TANPA
+    // kondisi: terukur di rig, labelnya lahir sebagai "27° Unknown" padahal
+    // get_sky()=-1 dan forecast_list[0] epoch=0 + "Retrieval failed". "Unknown"
+    // di pil 240 px adalah kata yang mengklaim sesuatu yang tidak kita tahu,
+    // jadi yang tersisa hanyalah angkanya.
+    const buta = i.get_sky() === GWeather.Sky.INVALID;
+    let teks = '';
+    if (!buta) {
+      teks = String(i.get_weather_summary() ?? '');
+      const pisah = teks.indexOf(': ');
+      if (pisah >= 0)
+        teks = teks.slice(pisah + 2);
+      if (teks === 'Unknown')
+        teks = '';
+    }
+    if (!has)
+      return teks.trim();
+    return `${Math.round(t)}° ${teks}`.trim();
   }
 
   // Satu-satunya tempat yang memutuskan state mana yang BOLEH tampil. Aturan
@@ -2283,6 +2463,12 @@ export class Island {
       this._agendaEvery = 0;
       this._askAgenda();
       this._syncAgenda();
+    }
+    // Cuaca juga dipanggil per menit, tapi kerjanya hanya satu perbandingan umur:
+    // kalau datanya masih segar, jalur ini tidak menyentuh jaringan sama sekali.
+    if (++this._weatherEvery >= WEATHER_TICKS) {
+      this._weatherEvery = 0;
+      this._refreshWeather();
     }
     // Pengumuman kedaluwarsa: peek turun ke pill, atau island tidur kalau
     // pointer tidak pernah ikut datang. Tick 500 ms sudah cukup murah untuk

@@ -1053,6 +1053,167 @@ menuntut pil idle kosong saat sakelarnya mati. Slot `clock` tetap default false;
 `ambient-agenda` default true karena pil yang bangun tanpa notifikasi dan tanpa
 treks memang tidak punya apa-apa untuk dikatakan.
 
+## TIER 33 — tenant cuaca: satu provider yang hidup, teks yang membohongi unit, dan biaya nol saat gelap
+
+Tahap 5 blueprint berbunyi "weather". Spike dijalankan lebih dulu, dan hasilnya
+menentukan desain lebih banyak daripada dokumentasi libgweather: semua angka di
+bawah adalah pengukuran di mesin ini (GJS 1.80.2, `GWeather-4.0` 4.400.2), dengan
+`strace -e trace=connect` untuk menghitung koneksi nyata, bukan perkiraan.
+
+### Hanya satu dari tiga provider yang menjawab
+
+| provider | hasil terukur |
+|---|---|
+| `MET_NO` | `valid=true`, 1062–1196 ms dingin, `"Jakarta: Overcast"`, 26.1 C |
+| `OWM` | `Failed to get OpenWeatherMap forecast data: [status: 401]` (147 ms) — butuh API key |
+| `METAR` | `Retrieval failed`, `valid=false` (636 ms) untuk lokasi kota |
+| ketiganya | 886 ms, `valid=true` — MET_NO yang menyelamatkan, dua lain gagal senyap |
+
+`misc/weather.js` shell mengaktifkan `METAR | MET_NO | OWM`. Island hanya
+`MET_NO`: dua provider mati itu adalah 600–900 ms per siklus yang tidak pernah
+berkontribusi. Konsekuensi jujur yang perlu diketahui orang saat membaca log:
+tanpa API key tidak ada jalur cadangan kalau met.no sedang turun.
+
+### Teks helper mengikuti konvensi LOKASI, bukan preferensi user
+
+`get_temp()`, `get_temp_summary()`, `get_pressure()`, `get_wind()` mengabaikan
+unit yang diminta dan mengembalikan `"79.0 °F"`, `"29.86 inHg"`,
+`"Southwest / 4.0 mph"` untuk **Jakarta**, sementara `get_value_temp(CENTIGRADE)`
+mengembalikan 26.1 dengan benar. `org.gnome.system.units` tidak ada di Ubuntu
+24.04 ini (`gsettings get` → "No such schema"), jadi tidak ada preferensi user
+yang bisa dihormati: satu-satunya jalan keluar adalah memformat angka sendiri.
+Island mengambil CENTIGRADE dan menulis `26°`.
+
+Tiga jebakan lain yang ikut terukur, semuanya di jalur yang terlihat aman:
+
+- `get_conditions()` **dan** `get_value_conditions()` kosong untuk MET_NO
+  (`has=false`, `flags=0`). Nuansa hujan (`"Light rain"`, `"Drizzle"`) hanya
+  hidup di string `get_weather_summary()` — itu yang dipakai, dipotong dari
+  depan `"Jakarta: "`.
+- `get_sunrise()`/`get_sunset()` memakai `U+2236` (`"05∶25"`), bukan titik dua
+  ASCII. Sama seperti insiden CJK di TIER 32: menyalin string helper mentah ke
+  permukaan island adalah cara cepat untuk merusak render.
+- `get_dew()` mengembalikan `-1000.0 °F` saat nilainya tidak ada dan
+  `get_visibility()` `"Unknown"`. Angka sentinel itu bukan data.
+- `Sky.INVALID` adalah **-1**, bukan 0, dan MET_NO bisa mengirim suhu jam ini
+  TANPA kondisi sama sekali: terukur di rig, `is_valid()=true`, suhu 27.0,
+  `get_sky()=-1`, ringkasannya `"Jakarta: Unknown"`, ikonnya jatuh ke
+  `weather-clear-symbolic`. Pil yang menulis `27° Unknown` mengklaim sesuatu
+  yang tidak kita tahu, jadi `_weatherText()` membuang teksnya dan menyisakan
+  angkanya. Entri `forecast_list[0]` ikut rusak pada saat yang sama (`epoch=0`,
+  tanpa suhu, ringkasan `"Retrieval failed"`) sementara entri berikutnya sehat —
+  jadi card nanti tidak boleh mulai dari indeks nol.
+
+### get_forecast_list() adalah per jam, bukan per hari
+
+Isinya 88 objek `GWeather.Info` — typelib 4.0 tidak mengekspor `Forecast`
+maupun `ForecastDay` sama sekali (`Object.getOwnPropertyNames` → undefined).
+Tiap entri punya suhu per jam, sky, icon, dan `is_daytime`, tapi
+`get_value_temp_min/max` per entri **kosong**, jadi rentang harian harus dihitung
+sendiri: terukur 18 jam hari ini → min 26, max 32. Itu bahan card nanti; pil saat ini hanya membaca Info utama.
+
+### Biayanya: nol saat gelap, satu koneksi saat hidup
+
+- `update()` **tanpa lokasi**: kembali dalam 0.0 ms, `is_valid()=false`, sinyal
+  `updated` tidak pernah turun, nol socket. Karena itu `weather-location`
+  bawaannya `''` dan tenant tidak membangun Info sebelum ada koordinat — fitur
+  yang belum dikonfigurasi tidak boleh membayar DNS.
+- Respons met.no membawa `expires` ±31 menit. Ambang umur data island 10 menit
+  (`WEATHER_STALE_S`), mengikuti `UPDATE_THRESHOLD` milik weather.js shell, jadi
+  sebagian celah menit dijawab cache.
+- Tiga `update()` beruntun sebelum satu pun `updated`: **satu**
+  `connect(:443)`. libgweather menjaga in-flight-nya sendiri, jadi island tidak
+  perlu flag "sedang dimuat".
+- Klien **kedua** di proses yang sama, lokasi yang sama: 253 ms dan **nol**
+  koneksi tambahan. Angka inilah yang mematikan gagasan memakai klien privat
+  dateMenu demi hemat jaringan — hematnya tidak ada.
+
+### Reuse klien cuaca shell ditolak tiga keadaan terpisah
+
+1. `org.gnome.shell.weather locations` = `@av []` dan `automatic-location`
+   false; `org.gnome.system.location enabled` false; tidak ada proses geoclue.
+2. GNOME Weather tidak terpasang, jadi `WeatherClient.available` false dan
+   `dateMenu.js:722` (`this.visible = this._weatherClient.available`)
+   menyembunyikan section cuaca shell — menumpang artinya menumpang objek yang
+   pemiliknya sendiri tidak ditampilkan.
+3. Bentuk serian lokasi milik shell adalah blob opaque: `serialize()` mengirim
+   `(uv)` yang dalamnya `(ssba(dd)a(dd))`, dan membacanya berarti ikut menjaga
+   format internal libgweather. Island menyimpan `"-6.2,106.8"` dan memakai
+   `find_nearest_city()` — satu baris gsettings, bisa dibaca manusia, dan
+   koordinat yang meleset sedikit tetap mendarat di kota yang benar.
+
+### Yang belum teruji, dan kenapa ia masih terbuka
+
+Offline total **tidak** berhasil diuji: `systemd-run --user -p
+PrivateNetwork=yes` yang dipakai untuk memutus jaringan tetap mengembalikan data
+(789 ms, `valid=true`), jadi unit itu tidak memblokir seperti yang diasumsikan —
+kesimpulan "island aman saat jaringan mati" belum punya bukti. Yang terbukti
+hanya sisi gagalnya: provider yang menolak tetap menurunkan `updated` cepat
+(401 = 147 ms, METAR = 636 ms) dengan `valid=false`, sehingga label lama
+bertahan, `_syncWeather()` mencetak `cuaca gagal (...)`, dan `get_value_update()`
+yang kembali false membuka retry di celah menit berikutnya.
+
+### Rig: R8 memisah gerbang dari jaringan
+
+R8A menguji gerbang tanpa menyentuh met.no (nol `cuaca kota=`, nol data, minimal
+satu `cuaca tanpa lokasi` dari enable()); R8B menuntut tenant dibangun saat
+lokasi berubah; R8C-TEKS menuntut pil memuat label yang **sama persis** dengan
+yang dicetak log (`cuaca -> "26° Light rain"` → `ambient=weather:26° Light
+rain`), R8C-TERANG menuntut ≥40 px; R8D mematikan sakelar saat datanya masih di
+tangan; R8E/R8F membuang lokasi lewat jalur **perubahan** setting (bukan boot)
+dan menuntut labelnya tidak mengendap.
+
+Run pertama merah tiga, dan penyebabnya bukan island: `rigctl()` menulis
+`printf '%s\n' "$*"`, jadi kutip dari pemanggil hilang sebelum masuk FIFO, dan
+`gsettings` menerima `-6.2,106.8` tanpa kutip — nilai yang mendarat adalah
+`"6"` (terbaca jelas di `cuaca lokasi tidak sah: "6"`). Perbaikannya di sisi
+rig: kirim satu argumen utuh yang sudah membawa kutipnya sendiri.
+
+Run kedua merah di tempat yang sama, dan kali ini penyebabnya benar-benar kode
+island: `Gio.Settings.get_string()` di GJS 1.80 mengembalikan **string biasa**,
+bukan pasangan `[ok, nilai]` seperti `get_boolean()`/`get_int()` yang biasa
+dikira orang dari bindings lain. `value[1]` pada `"-6.2,106.8"` adalah karakter
+`'6'`, jadi island membaca lokasinya sendiri sebagai string satu karakter dan
+menolaknya. Yang membuat ini lolos dari `node --check` dan lolos dari log
+javascript: tidak ada error sama sekali — jalurnya masuk akal, hanya isinya
+salah, dan `cuaca lokasi tidak sah: "6"` adalah satu-satunya saksi. Sekarang
+`_weatherLoc()` memakai `get_value(...).unpack()`, bentuk yang sama dengan
+`_syncOpts()` di seluruh file ini.
+
+Run ketiga hijau 39/39 — dan labelnya `27° Unknown`. Tidak ada satu pun gerbang
+R8 yang bisa menangkapnya: R8C-TEKS membandingkan pil dengan apa yang dicetak
+log, jadi selama kedua sisi berasal dari fungsi yang sama, assertion ini hanya
+menguji bahwa island konsisten dengan dirinya sendiri, bukan bahwa isinya
+berarti. Yang membuatnya bunyi adalah membaca screenshot, dan penyebabnya baru
+keluar dari probe `get_sky()`. Pelajarannya: gerbang yang membandingkan dua sisi
+dari satu sumber tidak membuktikan apa pun di atas "tidak ada yang salah
+tangkap di tengah jalan" — isi yang salah tetap butuh mata.
+
+Pelajaran yang lebih umum: **jangan percaya bentuk return binding GI dari
+kebiasaan**. Yang salah saya tebak, semua dari spike dan run rig pertama:
+`get_string()` (bukan `[ok, nilai]`), `network_error` (method, bukan property),
+`get_value_humidity()`/`get_condition()`/`get_condition_name()`/`get_summary()`
+dan `update_async()` (tidak ada di typelib 4.0 sama sekali; yang ada `get_humidity()`,
+`get_sky()`, `get_weather_summary()`, dan `update()` + sinyal `updated`),
+`Location.deserialize()` (instance method pada `world`, bukan static), dan
+`new GLib.MainLoop()` yang di gjs 1.80 butuh dua argumen. Yang berbahaya bukan
+yang melempar TypeError — itu langsung merah di rig — melainkan yang
+mengembalikan sesuatu yang masih bisa di-index tanpa suara-suara.
+
+### Yang sengaja tidak diubah
+
+- Tidak ada Geoclue, tidak ada PermissionStore, tidak ada prompt izin lokasi.
+  Koordinat ditulis user sendiri; opsi "tombol auto" tetap tahap terpisah.
+- Tidak ada ikon cuaca di pil, tidak ada card, tidak ada daftar per jam.
+  Tahap ini menghasilkan satu baris teks; permukaannya urusan Tahap 6.
+- Cuaca tidak membangunkan island dan tidak menahan tidurnya — TIER 29 berlaku
+  penuh, sama seperti agenda.
+- Urutan prioritas jadi `mic > agenda > weather > clock`: cuaca berada di atas
+  jam karena jam adalah fallback murni, dan di bawah agenda karena satu acara
+  yang akan datang lebih berhak atas pil daripada langit.
+- `ambient-weather` default true; yang memadamkannya adalah lokasi kosong.
+  Default yang ramah tidak harus default yang berisik.
+
 ## Rig hitam total: shell tidak melukis satu frame pun tanpa damage
 
 Kanvas `:11` terbaca hitam pekat (0 px non-hitam, termasuk strip panel) sementara
