@@ -2448,24 +2448,55 @@ export class Island {
     const playing = player?.status === 'Playing';
     if (!playing) {
       for (const {led} of this._revLeds)
-        led.set_opacity(30);
+        led.set_opacity(25);
       return;
     }
     const cur = elapsed ?? (player.status === 'Playing'
       ? player.pos + player.rate * (monoMs() - player.posAt) / 1000
       : player.pos);
-    const cycle = (cur % 2.4) / 2.4;
-    const activeCount = Math.floor(cycle * 11);
 
-    for (let i = 0; i < 10; i++) {
-      const {led} = this._revLeds[i];
-      if (activeCount === 10) {
-        led.set_opacity(255);
-      } else if (i < activeCount) {
-        led.set_opacity(255);
-      } else {
-        led.set_opacity(35);
-      }
+    // Skala volume player (0.2 .. 1.0)
+    const vol = typeof player.volume === 'number' ? Math.max(0.2, Math.min(1.0, player.volume)) : 1.0;
+
+    // 1. Pita Bass / Low (LED 0, 1, 2 - Hijau):
+    // Denyut ketukan drum (tempo ~120 BPM = 2 Hz), power wave
+    const beat = Math.pow(Math.abs(Math.sin(cur * Math.PI * 2)), 2.5);
+    const bassLevel = Math.min(1.0, beat * 1.25);
+
+    // 2. Pita Vokal / Melodi (LED 3, 4, 5, 6 - Merah Rosso):
+    // Mengikuti kehadiran lirik aktif dan modulasi nada vokal
+    const isVocalActive = this._mLyric && this._mLyric.visible &&
+      !this._mLyric.text?.startsWith('♪') && !this._mLyric.text?.includes('...');
+    const vocalWave = isVocalActive
+      ? 0.5 + 0.5 * Math.sin(cur * 7.8) * Math.cos(cur * 3.4)
+      : 0.25 + 0.25 * Math.abs(Math.sin(cur * 4.2));
+    const vocalLevel = Math.min(1.0, vocalWave * 1.2);
+
+    // 3. Pita Treble / High (LED 7, 8, 9 - Biru Racing):
+    // Percikan nada tinggi (cymbal/hi-hat) pada syncopation (fase offset)
+    const treble = Math.pow(Math.abs(Math.cos(cur * Math.PI * 4 + 0.7)), 3.0);
+    const trebleLevel = Math.min(1.0, treble * 1.3);
+
+    // Pemetaan 10 LED ke 3 pita frekuensi nada:
+    const tBass = [0.2, 0.5, 0.8];
+    for (let i = 0; i < 3; i++) {
+      const active = bassLevel >= tBass[i];
+      const op = active ? Math.round(255 * vol) : Math.round(30 * vol);
+      this._revLeds[i].led.set_opacity(op);
+    }
+
+    const tVocal = [0.2, 0.45, 0.7, 0.9];
+    for (let i = 0; i < 4; i++) {
+      const active = vocalLevel >= tVocal[i];
+      const op = active ? Math.round(255 * vol) : Math.round(30 * vol);
+      this._revLeds[3 + i].led.set_opacity(op);
+    }
+
+    const tTreble = [0.3, 0.6, 0.85];
+    for (let i = 0; i < 3; i++) {
+      const active = trebleLevel >= tTreble[i];
+      const op = active ? Math.round(255 * vol) : Math.round(30 * vol);
+      this._revLeds[7 + i].led.set_opacity(op);
     }
   }
 
@@ -2483,13 +2514,28 @@ export class Island {
       }
       return;
     }
-    const t = monoMs() / 150;
+    const cur = (player.pos + player.rate * (monoMs() - player.posAt) / 1000) || (monoMs() / 1000);
+    const vol = typeof player.volume === 'number' ? Math.max(0.3, Math.min(1.0, player.volume)) : 1.0;
+
+    // 4 Bar Equalizer disinkronkan ke 4 pita frekuensi:
+    // Bar 0: Sub-bass (hentakan ritmik berat)
+    const b0 = Math.round((3 + 9 * Math.pow(Math.abs(Math.sin(cur * Math.PI * 2)), 2)) * vol);
+    // Bar 1: Mid-bass (ritme pengiring)
+    const b1 = Math.round((4 + 11 * Math.abs(Math.sin(cur * 4.5 + 0.8))) * vol);
+    // Bar 2: Vocal Presence (dinamika nada vokal)
+    const isVocal = this._mLyric && this._mLyric.visible &&
+      !this._mLyric.text?.startsWith('♪') && !this._mLyric.text?.includes('...');
+    const b2 = Math.round((isVocal ? 6 + 8 * Math.abs(Math.cos(cur * 7.2)) : 3 + 5 * Math.abs(Math.sin(cur * 3.5))) * vol);
+    // Bar 3: Treble / Shimmer
+    const b3 = Math.round((3 + 8 * Math.pow(Math.abs(Math.cos(cur * Math.PI * 4 + 0.5)), 2)) * vol);
+
     const heights = [
-      Math.round(4 + 8 * Math.abs(Math.sin(t * 1.3))),
-      Math.round(3 + 10 * Math.abs(Math.sin(t * 1.7 + 0.6))),
-      Math.round(5 + 9 * Math.abs(Math.sin(t * 2.1 + 1.2))),
-      Math.round(3 + 7 * Math.abs(Math.sin(t * 1.1 + 1.8))),
+      Math.max(3, Math.min(14, b0)),
+      Math.max(3, Math.min(15, b1)),
+      Math.max(3, Math.min(14, b2)),
+      Math.max(3, Math.min(12, b3)),
     ];
+
     for (let i = 0; i < 4; i++) {
       this._eqBars[i].ease({
         height: heights[i],

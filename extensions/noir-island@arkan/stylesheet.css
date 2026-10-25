@@ -349,6 +349,7 @@
   width: 6px;
   height: 3px;
   border-radius: 1px;
+  transition-duration: 90ms;
 }
 
 .noir-island-rev-led--green {
