@@ -419,22 +419,6 @@
 }
 
 /* Cockpit Switcher Nav Bar */
-.noir-island-nav-container {
-  vertical: true;
-  spacing: 2px;
-  y-align: center;
-  min-height: 24px;
-}
-
-.noir-island-nav-hint {
-  font-family: Titillium Web;
-  font-size: 8px;
-  font-weight: 700;
-  color: #fed300;
-  letter-spacing: 0.5px;
-  x-align: center;
-}
-
 .noir-island-nav-box {
   spacing: 2px;
   y-align: center;

@@ -1613,33 +1613,21 @@ export class Island {
   }
 
   _navBox(currentMode) {
-    const container = new St.BoxLayout({
-      style_class: 'noir-island-nav-container',
-      vertical: true,
-      y_align: Clutter.ActorAlign.CENTER,
-    });
-    const hintLabel = new St.Label({
-      style_class: 'noir-island-nav-hint',
-      text: '',
-      visible: false,
-    });
-    this._noEllipsis(hintLabel);
-
     const box = new St.BoxLayout({
       style_class: 'noir-island-nav-box',
       y_align: Clutter.ActorAlign.CENTER,
     });
     const items = [
-      { id: 'media', icon: 'audio-x-generic-symbolic', label: 'MEDIA PLAYER' },
-      { id: 'telemetry', icon: 'utilities-system-monitor-symbolic', label: 'TELEMETRI F1' },
-      { id: 'timer', icon: 'preferences-system-time-symbolic', label: 'CHRONOGRAPH' },
-      { id: 'radar', icon: 'find-location-symbolic', label: 'RADAR MONZA' },
-      { id: 'drop', icon: 'folder-download-symbolic', label: 'NOTCH DROP' },
-      { id: 'clip', icon: 'edit-copy-symbolic', label: 'PAPAN KLIP' },
-      { id: 'cmd', icon: 'utilities-terminal-symbolic', label: 'COMMAND BAR' },
-      { id: 'radio', icon: 'audio-input-microphone-symbolic', label: 'TEAM RADIO' },
-      { id: 'ignition', icon: 'security-high-symbolic', label: 'SECURITY HUD' },
-      { id: 'weather', icon: 'weather-clear-symbolic', label: 'METEO RACING' },
+      { id: 'media', icon: 'audio-x-generic-symbolic' },
+      { id: 'telemetry', icon: 'utilities-system-monitor-symbolic' },
+      { id: 'timer', icon: 'preferences-system-time-symbolic' },
+      { id: 'radar', icon: 'find-location-symbolic' },
+      { id: 'drop', icon: 'folder-download-symbolic' },
+      { id: 'clip', icon: 'edit-copy-symbolic' },
+      { id: 'cmd', icon: 'utilities-terminal-symbolic' },
+      { id: 'radio', icon: 'audio-input-microphone-symbolic' },
+      { id: 'ignition', icon: 'security-high-symbolic' },
+      { id: 'weather', icon: 'weather-clear-symbolic' },
     ];
     for (const item of items) {
       const isActive = item.id === currentMode;
@@ -1652,14 +1640,6 @@ export class Island {
         icon_size: 11,
       });
       btn.set_child(icon);
-      btn.connect('enter-event', () => {
-        hintLabel.set_text(item.label);
-        hintLabel.visible = true;
-      });
-      btn.connect('leave-event', () => {
-        hintLabel.set_text('');
-        hintLabel.visible = false;
-      });
       btn.connect('clicked', () => {
         this._playSfx('click');
         this._cardMode = item.id;
@@ -1669,9 +1649,7 @@ export class Island {
       });
       box.add_child(btn);
     }
-    container.add_child(hintLabel);
-    container.add_child(box);
-    return container;
+    return box;
   }
 
   _hairline() {
