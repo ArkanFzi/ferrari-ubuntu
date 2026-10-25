@@ -339,6 +339,48 @@
   line-height: 1.25;
 }
 
+/* F1 Rev-Light Shift LEDs Strip (Scuderia Cockpit) */
+.noir-island-rev-box {
+  spacing: 3px;
+  margin-bottom: 2px;
+}
+
+.noir-island-rev-led {
+  width: 6px;
+  height: 3px;
+  border-radius: 1px;
+}
+
+.noir-island-rev-led--green {
+  background-color: #00e676;
+  box-shadow: 0 0 4px rgba(0, 230, 118, 0.7);
+}
+
+.noir-island-rev-led--red {
+  background-color: #da291c;
+  box-shadow: 0 0 5px rgba(218, 41, 28, 0.8);
+}
+
+.noir-island-rev-led--blue {
+  background-color: #2979ff;
+  box-shadow: 0 0 5px rgba(41, 121, 255, 0.8);
+}
+
+/* Dynamic Equalizer in Pill */
+.noir-island-eq {
+  spacing: 2px;
+  margin-left: 6px;
+  margin-right: 4px;
+}
+
+.noir-island-eq-bar {
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background-color: #da291c;
+  box-shadow: 0 0 4px rgba(218, 41, 28, 0.5);
+}
+
 .noir-island-cover:hover {
   box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.50);
 }

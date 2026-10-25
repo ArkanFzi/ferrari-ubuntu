@@ -510,10 +510,26 @@ export class Island {
       y_align: Clutter.ActorAlign.CENTER,
       visible: false,
     });
+    this._pillEq = new St.BoxLayout({
+      style_class: 'noir-island-eq',
+      y_align: Clutter.ActorAlign.CENTER,
+      visible: false,
+    });
+    this._eqBars = [];
+    for (let b = 0; b < 4; b++) {
+      const bar = new St.Widget({
+        style_class: 'noir-island-eq-bar',
+        y_align: Clutter.ActorAlign.CENTER,
+      });
+      bar.set_height(4);
+      this._eqBars.push(bar);
+      this._pillEq.add_child(bar);
+    }
     pill.add_child(this._dot);
     pill.add_child(this._pillKicker);
     pill.add_child(this._hairline());
     pill.add_child(this._pillText);
+    pill.add_child(this._pillEq);
     pill.add_child(this._pillBadge);
     island.add_child(this._pillRow);
 
@@ -567,6 +583,21 @@ export class Island {
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
     });
+    this._revBox = new St.BoxLayout({
+      style_class: 'noir-island-rev-box',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._revLeds = [];
+    for (let i = 0; i < 10; i++) {
+      const ledType = i < 3 ? 'green' : i < 7 ? 'red' : 'blue';
+      const led = new St.Widget({
+        style_class: `noir-island-rev-led noir-island-rev-led--${ledType}`,
+      });
+      led.set_opacity(40);
+      this._revLeds.push({led, type: ledType});
+      this._revBox.add_child(led);
+    }
+    col.add_child(this._revBox);
     this._mTitle = this._label('noir-island-title');
     this._mArtist = this._label('noir-island-line');
     this._mAlbum = this._label('noir-island-faint');
@@ -1970,12 +2001,19 @@ export class Island {
     // sana provider yang memutuskan, dan tanpa provider pil memang hanya berisi
     // titik rosso.
     if (content === 'media') {
-      this._pillKicker.set_text(jam);
+      const wsIdx = global.workspace_manager ? global.workspace_manager.get_active_workspace_index() + 1 : 1;
+      this._pillKicker.set_text(`G${wsIdx} · ${jam}`);
       this._pillText.set_text(player.meta.title);
+      if (this._pillEq) {
+        this._pillEq.visible = true;
+        this._updateEq(player);
+      }
     } else {
       const p = this._ambient();
       this._pillKicker.set_text(p?.kicker() ? jam : '');
       this._pillText.set_text(p?.nilai() ?? '');
+      if (this._pillEq)
+        this._pillEq.visible = false;
     }
     // Antrean tetap terlihat saat island diam: notifikasi yang tertahan
     // (fullscreen / DND) tidak boleh hilang tanpa jejak.
@@ -2069,6 +2107,8 @@ export class Island {
       mode: Clutter.AnimationMode.LINEAR,
     });
     this._updateLyrics(player, elapsed);
+    this._updateRevLights(player, elapsed);
+    this._updateEq(player);
   }
 
   _fillNotif(badge) {
@@ -2399,6 +2439,63 @@ export class Island {
     } else if (this._mLyric.visible) {
       this._mLyric.visible = false;
       this._fitText();
+    }
+  }
+
+  _updateRevLights(player, elapsed) {
+    if (!this._revBox || !this._mediaRow.visible || !this._revLeds)
+      return;
+    const playing = player?.status === 'Playing';
+    if (!playing) {
+      for (const {led} of this._revLeds)
+        led.set_opacity(30);
+      return;
+    }
+    const cur = elapsed ?? (player.status === 'Playing'
+      ? player.pos + player.rate * (monoMs() - player.posAt) / 1000
+      : player.pos);
+    const cycle = (cur % 2.4) / 2.4;
+    const activeCount = Math.floor(cycle * 11);
+
+    for (let i = 0; i < 10; i++) {
+      const {led} = this._revLeds[i];
+      if (activeCount === 10) {
+        led.set_opacity(255);
+      } else if (i < activeCount) {
+        led.set_opacity(255);
+      } else {
+        led.set_opacity(35);
+      }
+    }
+  }
+
+  _updateEq(player) {
+    if (!this._pillEq || !this._pillEq.visible || !this._eqBars)
+      return;
+    const playing = player?.status === 'Playing';
+    if (!playing) {
+      for (let i = 0; i < 4; i++) {
+        this._eqBars[i].ease({
+          height: 3,
+          duration: TICK_MS,
+          mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+      }
+      return;
+    }
+    const t = monoMs() / 150;
+    const heights = [
+      Math.round(4 + 8 * Math.abs(Math.sin(t * 1.3))),
+      Math.round(3 + 10 * Math.abs(Math.sin(t * 1.7 + 0.6))),
+      Math.round(5 + 9 * Math.abs(Math.sin(t * 2.1 + 1.2))),
+      Math.round(3 + 7 * Math.abs(Math.sin(t * 1.1 + 1.8))),
+    ];
+    for (let i = 0; i < 4; i++) {
+      this._eqBars[i].ease({
+        height: heights[i],
+        duration: TICK_MS,
+        mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+      });
     }
   }
 
