@@ -1269,10 +1269,17 @@ export class Island {
   // set_opacity/set_size langsung tergambar. Jadi transisi dirakit sendiri: satu
   // timer untuk semua ramp, berhenti saat tidak ada yang tersisa.
   _rampTo(actor, tulis, target, {dari = 0, tunda = 0, dur = FADE_MS} = {}) {
-    this._ramps ??= new Map();
-    this._ramps.set(actor, {
-      tulis, awal: dari, target, dur, mulai: monoMs() + tunda,
-    });
+    this._ramps ??= new Set();
+    for (const r of this._ramps) {
+      if (r.actor === actor && r.tulis === tulis) {
+        this._ramps.delete(r);
+        break;
+      }
+    }
+    const r = {
+      actor, tulis, awal: dari, target, dur, mulai: monoMs() + tunda,
+    };
+    this._ramps.add(r);
     tulis(actor, dari);
     if (!this._rampId)
       this._rampId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, RAMP_MS,
@@ -1281,13 +1288,13 @@ export class Island {
 
   _stepRamps() {
     const kini = monoMs();
-    for (const [actor, r] of this._ramps) {
+    for (const r of this._ramps) {
       const p = Math.min(1, Math.max(0, kini - r.mulai) / r.dur);
       // EASE_OUT yang mendekati bentuk lama: cepat di muka, melambat di ujung.
       const l = 1 - (1 - p) * (1 - p);
-      r.tulis(actor, r.awal + (r.target - r.awal) * l);
+      r.tulis(r.actor, r.awal + (r.target - r.awal) * l);
       if (p >= 1)
-        this._ramps.delete(actor);
+        this._ramps.delete(r);
     }
     if (this._ramps.size)
       return GLib.SOURCE_CONTINUE;
