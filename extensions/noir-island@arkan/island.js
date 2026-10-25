@@ -68,7 +68,7 @@ const PEEK_W = 340;
 // Tinggi pill dan peek: satu baris. Card punya tingginya sendiri (CARD_H).
 const PILL_H = 34;
 const MEDIA_W = 580;
-const MEDIA_H = 96;
+const MEDIA_H = 104;
 const DASH_H = 64;
 const NOTIF_W = 460;
 const NOTIF_H = 72;
@@ -700,6 +700,7 @@ export class Island {
       y_align: Clutter.ActorAlign.CENTER,
     });
     ctl.add_child(this._time);
+    ctl.add_child(this._hairline());
     ctl.add_child(this._btnPrev);
     ctl.add_child(this._btnPlay);
     ctl.add_child(this._btnNext);
