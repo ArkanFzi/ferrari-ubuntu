@@ -167,6 +167,7 @@
   min-height: 3px;
   background-color: #da291c;
   border-radius: 2px;
+  box-shadow: 0 0 6px rgba(218, 41, 28, 0.65);
 }
 
 .noir-island-actions {
@@ -326,8 +327,17 @@
   font-size: 11px;
   font-weight: 600;
   color: #ffffff;
+  line-height: 1.25;
 }
 
 .noir-island-cover:hover {
-  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.40);
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.50);
+}
+
+.noir-island-btn--round:active {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.noir-island-btn--play:active {
+  background-color: #9e1b11;
 }

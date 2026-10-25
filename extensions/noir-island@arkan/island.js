@@ -67,7 +67,7 @@ const PILL_W = 240;
 const PEEK_W = 340;
 // Tinggi pill dan peek: satu baris. Card punya tingginya sendiri (CARD_H).
 const PILL_H = 34;
-const MEDIA_W = 420;
+const MEDIA_W = 460;
 const MEDIA_H = 64;
 const NOTIF_W = 460;
 const NOTIF_H = 72;
@@ -88,6 +88,7 @@ const FADE_MS = 120;
 const RAMP_MS = 16;
 const TULIS_OPACITY = (a, v) => a.set_opacity(Math.round(v));
 const TULIS_SCALE_Y = (a, v) => a.set_scale(1, v);
+const TULIS_TRANSLATION_Y = (a, v) => a.set_translation(0, v, 0);
 // State baru harus bertahan sejenak sebelum diterima. Angka di bawah ambang
 // kedip mata tapi di atas flapping player yang paling umum.
 const DWELL_MS = 1200;
@@ -246,6 +247,9 @@ export class Island {
     this._currentLyrics = null;
     this._lyricsKey = null;
     this._lyricsFetching = null;
+    this._lyricTimerId = 0;
+    this._lyricSlidingText = null;
+    this._bloomTimerId = 0;
     this._shownKey = null;
     this._shownNotif = null;
     this._fullscreen = false;
@@ -421,6 +425,15 @@ export class Island {
     this._currentLyrics = null;
     this._lyricsKey = null;
     this._lyricsFetching = null;
+    if (this._lyricTimerId) {
+      GLib.source_remove(this._lyricTimerId);
+      this._lyricTimerId = 0;
+    }
+    this._lyricSlidingText = null;
+    if (this._bloomTimerId) {
+      GLib.source_remove(this._bloomTimerId);
+      this._bloomTimerId = 0;
+    }
 
     if (this._island) {
       Main.layoutManager.removeChrome(this._island);
@@ -557,7 +570,13 @@ export class Island {
     this._mTitle = this._label('noir-island-title');
     this._mArtist = this._label('noir-island-line');
     this._mAlbum = this._label('noir-island-faint');
-    this._mLyric = this._label('noir-island-lyric-active');
+    this._mLyric = new St.Label({
+      style_class: 'noir-island-lyric-active',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._mLyric.clutter_text.line_wrap = true;
+    this._mLyric.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+    this._mLyric.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
     this._mLyric.visible = false;
     col.add_child(this._mTitle);
     col.add_child(this._mArtist);
@@ -1169,17 +1188,50 @@ export class Island {
     // membuktikan island rata di bawah jam dan bukan di tengah monitor.
     this._geo = `${w}x${h} @${x},${y} panel=${Math.round(Main.panel.height || 0)} sumbu=${this._clockCenter()}`;
     this._progW = Math.max(0, w - 2 * PROG_INSET);
+    const wasStowed = this._stowed;
     this._unstash(w, h, x, y);
-    // Ukuran akhir ditulis lewat set_size, BUKAN ease({height}). Terbukti live di
-    // sesi Wayland: transisi properti tinggi tidak pernah mendarat — prefH actor
-    // tetap 0..0 sampai +1500 ms sesudah morph, island naik selebar card tapi
-    // setinggi 0 px, visible dan opacity 255 namun nol pixel — sementara
-    // set_size(460, 72) pada actor yang sama langsung teralokasi 460x72. Di X11
-    // transisinya jalan, itu sebabnya rig selalu hijau dan bugnya lolos.
-    // Yang boleh dianimasikan adalah opacity, dan itu dikerjakan _fadeTo.
-    this._island.set_size(w, h);
-    this._island.set_position(x, y);
-    this._progress.set_size(this._progW, PROGRESS_H);
+
+    const startW = this._island.width || w;
+    const startH = this._island.height || h;
+    const diffW = w - startW;
+    const diffH = h - startH;
+
+    if (!wasStowed && (Math.abs(diffW) > 10 || Math.abs(diffH) > 6)) {
+      const dur = 180;
+      const t0 = monoMs();
+      if (this._bloomTimerId) {
+        GLib.source_remove(this._bloomTimerId);
+        this._bloomTimerId = 0;
+      }
+      this._bloomTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, RAMP_MS, () => {
+        if (!this._island || this._dead || this._stowed) {
+          this._bloomTimerId = 0;
+          return GLib.SOURCE_REMOVE;
+        }
+        const p = Math.min(1, Math.max(0, monoMs() - t0) / dur);
+        const l = 1 - (1 - p) * (1 - p);
+        const curW = Math.round(startW + diffW * l);
+        const curH = Math.round(startH + diffH * l);
+        const [curX, curY] = this._anchor(curW);
+        this._island.set_size(curW, curH);
+        this._island.set_position(curX, curY);
+        const pw = Math.max(0, curW - 2 * PROG_INSET);
+        this._progress.set_size(pw, PROGRESS_H);
+        if (p >= 1) {
+          this._bloomTimerId = 0;
+          this._island.set_size(w, h);
+          this._island.set_position(x, y);
+          this._progress.set_size(this._progW, PROGRESS_H);
+          return GLib.SOURCE_REMOVE;
+        }
+        return GLib.SOURCE_CONTINUE;
+      });
+    } else {
+      this._island.set_size(w, h);
+      this._island.set_position(x, y);
+      this._progress.set_size(this._progW, PROGRESS_H);
+    }
+
     this._fadeTo(level, content);
     this._setActive(true);
     this._setClock(level === 'pill');
@@ -2203,6 +2255,42 @@ export class Island {
     return result.length > 0 ? result : null;
   }
 
+  _slideLyric(newText) {
+    if (!this._mLyric)
+      return;
+    if (!this._mLyric.text || !this._mLyric.visible) {
+      this._mLyric.set_text(newText);
+      this._mLyric.set_translation(0, 0, 0);
+      this._mLyric.set_opacity(255);
+      this._mLyric.visible = true;
+      this._fitText();
+      return;
+    }
+    if (this._lyricSlidingText === newText)
+      return;
+    this._lyricSlidingText = newText;
+
+    // Fase 1: slide up sedikit (-5px) sambil fade out
+    this._rampTo(this._mLyric, TULIS_OPACITY, 0, {dari: this._mLyric.opacity, dur: 90});
+    this._rampTo(this._mLyric, TULIS_TRANSLATION_Y, -5, {dari: 0, dur: 90});
+
+    if (this._lyricTimerId)
+      GLib.source_remove(this._lyricTimerId);
+
+    this._lyricTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 95, () => {
+      this._lyricTimerId = 0;
+      if (!this._island || this._dead || !this._mLyric)
+        return GLib.SOURCE_REMOVE;
+      this._mLyric.set_text(newText);
+      this._mLyric.visible = true;
+      this._fitText();
+      // Fase 2: slide in dari bawah (+5px -> 0px) sambil fade in
+      this._rampTo(this._mLyric, TULIS_OPACITY, 255, {dari: 0, dur: 140});
+      this._rampTo(this._mLyric, TULIS_TRANSLATION_Y, 0, {dari: 5, dur: 140});
+      return GLib.SOURCE_REMOVE;
+    });
+  }
+
   _updateLyrics(player, elapsed) {
     if (!this._mLyric || !this._currentLyrics || this._currentLyrics.length === 0) {
       if (this._mLyric && this._mLyric.visible) {
@@ -2224,9 +2312,7 @@ export class Island {
     }
     if (active) {
       if (active.text !== this._mLyric.text || !this._mLyric.visible) {
-        this._mLyric.set_text(active.text);
-        this._mLyric.visible = true;
-        this._fitText();
+        this._slideLyric(active.text);
       }
     } else if (this._mLyric.visible) {
       this._mLyric.visible = false;
