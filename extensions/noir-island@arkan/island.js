@@ -67,7 +67,7 @@ const PILL_W = 240;
 const PEEK_W = 340;
 // Tinggi pill dan peek: satu baris. Card punya tingginya sendiri (CARD_H).
 const PILL_H = 34;
-const MEDIA_W = 460;
+const MEDIA_W = 580;
 const MEDIA_H = 64;
 const NOTIF_W = 460;
 const NOTIF_H = 72;
@@ -163,7 +163,7 @@ const MIN_W = 200;
 // (2x14), thumb (44), dua gap baris (2x10) dan kelompok kontrol lengkap
 // (waktu + hairline + tiga tombol). Diukur di rig: card 420 px menyisakan
 // 169 px untuk kolom teks.
-const MEDIA_CHROME_W = 251;
+const MEDIA_CHROME_W = 310;
 
 // Geometri adalah fungsi dari (level, content), tidak pernah dari isinya. Pill
 // dan peek cuma beda lebar; card mengambil angka per konten.
