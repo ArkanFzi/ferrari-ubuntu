@@ -386,6 +386,98 @@
   box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.50);
 }
 
+/* Cockpit Switcher Nav Bar */
+.noir-island-nav-box {
+  spacing: 3px;
+  y-align: center;
+}
+
+.noir-island-nav-btn {
+  padding: 4px 6px;
+  border-radius: 6px;
+  background-color: transparent;
+  color: #777777;
+}
+
+.noir-island-nav-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.noir-island-nav-btn--active {
+  background-color: rgba(218, 41, 28, 0.25);
+  color: #fed300;
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.6);
+}
+
+/* F1 Telemetry Card */
+.noir-island-telem-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(254, 211, 0, 0.12);
+  color: #fed300;
+  box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.35);
+  margin-right: 10px;
+}
+
+.noir-island-telem-col {
+  spacing: 2px;
+}
+
+.noir-island-telem-turbo {
+  font-family: Titillium Web;
+  font-size: 11px;
+  font-weight: 700;
+  color: #00e676;
+}
+
+/* Ferrari Chronograph Lap Timer Card */
+.noir-island-timer-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(218, 41, 28, 0.15);
+  color: #da291c;
+  box-shadow: inset 0 0 0 1px rgba(218, 41, 28, 0.45);
+  margin-right: 10px;
+}
+
+.noir-island-timer-digits {
+  font-family: Titillium Web;
+  font-size: 19px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+}
+
+.noir-island-timer-tag {
+  font-family: Inter;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fed300;
+  letter-spacing: 0.5px;
+}
+
+.noir-island-timer-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.noir-island-timer-btn:hover {
+  background-color: rgba(218, 41, 28, 0.4);
+}
+
+.noir-island-timer-btn--play {
+  background-color: #da291c;
+  color: #ffffff;
+  box-shadow: 0 0 6px rgba(218, 41, 28, 0.6);
+}
+
 .noir-island-btn--round:active {
   background-color: rgba(255, 255, 255, 0.22);
 }

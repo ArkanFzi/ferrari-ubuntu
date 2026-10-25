@@ -171,12 +171,16 @@ const CARD_W = {
   media: MEDIA_W,
   notif: NOTIF_W,
   weather: MEDIA_W,
+  telemetry: MEDIA_W,
+  timer: MEDIA_W,
 };
 
 const CARD_H = {
   media: MEDIA_H + PROGRESS_H,
   notif: NOTIF_H,
   weather: MEDIA_H + PROGRESS_H,
+  telemetry: MEDIA_H + PROGRESS_H,
+  timer: MEDIA_H + PROGRESS_H,
 };
 
 const LEVEL_W = {
@@ -269,6 +273,22 @@ export class Island {
     // menempel; setelahnya island tidur walau trek masih berputar.
     this._wakeUntil = 0;
     this._cardOpen = false;
+    this._cardMode = null;
+    this._cpuUsage = 0;
+    this._lastCpuIdle = 0;
+    this._lastCpuTotal = 0;
+    this._memUsedText = '';
+    this._memTotalText = '';
+    this._memPct = 0;
+    this._lastNetRx = 0;
+    this._lastNetTx = 0;
+    this._lastNetSample = 0;
+    this._netRxText = '';
+    this._netTxText = '';
+    this._timerRunning = false;
+    this._timerStart = 0;
+    this._timerAccum = 0;
+    this._timerMode = 'pomodoro';
     this._outsideId = 0;
     this._active = null;
     this._clockHiddenByUs = false;
@@ -632,6 +652,8 @@ export class Island {
     ctl.add_child(this._btnPrev);
     ctl.add_child(this._btnPlay);
     ctl.add_child(this._btnNext);
+    ctl.add_child(this._hairline());
+    ctl.add_child(this._navBox('media'));
 
     this._mediaRow.add_child(this._cover);
     // Kolom teks dibungkus St.Button: klik di judul/artis/album adalah jalan
@@ -836,7 +858,220 @@ export class Island {
     this._weatherRow.add_child(this._weatherCollapse);
     this._weatherRow.add_child(this._hairline());
     this._weatherRow.add_child(this._wHourlyBox);
+    this._weatherRow.add_child(this._hairline());
+    this._weatherRow.add_child(this._navBox('weather'));
     island.add_child(this._weatherRow);
+
+    // --------------------------------------------------- Telemetry Card (F1 HUD)
+    this._telemetryRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._telemCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._telemCollapse.connect('clicked', () => this._collapse());
+
+    this._telemTile = new St.Bin({
+      style_class: 'noir-island-telem-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._telemIcon = new St.Icon({
+      icon_name: 'utilities-system-monitor-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._telemTile.set_child(this._telemIcon);
+
+    const telemCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+      style_class: 'noir-island-telem-col',
+    });
+    this._telemCpuTitle = this._label('noir-island-title');
+    this._telemCpuSub = this._label('noir-island-line');
+    telemCol1.add_child(this._telemCpuTitle);
+    telemCol1.add_child(this._telemCpuSub);
+
+    const telemInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    telemInfoBox.add_child(this._telemTile);
+    telemInfoBox.add_child(telemCol1);
+    this._telemCollapse.set_child(telemInfoBox);
+
+    const telemCol2 = new St.BoxLayout({
+      vertical: true,
+      y_align: Clutter.ActorAlign.CENTER,
+      style_class: 'noir-island-telem-col',
+    });
+    this._telemMemText = new St.Label({
+      style_class: 'noir-island-line',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._telemNetText = new St.Label({
+      style_class: 'noir-island-telem-turbo',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._noEllipsis(this._telemMemText);
+    this._noEllipsis(this._telemNetText);
+    telemCol2.add_child(this._telemMemText);
+    telemCol2.add_child(this._telemNetText);
+
+    this._telemetryRow.add_child(this._telemCollapse);
+    this._telemetryRow.add_child(this._hairline());
+    this._telemetryRow.add_child(telemCol2);
+    this._telemetryRow.add_child(this._hairline());
+    this._telemetryRow.add_child(this._navBox('telemetry'));
+    island.add_child(this._telemetryRow);
+
+    // --------------------------------------------------- Lap Timer Card (Chrono)
+    this._timerRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._timerCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._timerCollapse.connect('clicked', () => this._collapse());
+
+    this._timerTile = new St.Bin({
+      style_class: 'noir-island-timer-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._timerIcon = new St.Icon({
+      icon_name: 'preferences-system-time-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._timerTile.set_child(this._timerIcon);
+
+    const timerCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._timerModeLabel = new St.Label({
+      style_class: 'noir-island-timer-tag',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._timerTimeLabel = new St.Label({
+      style_class: 'noir-island-timer-digits',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._noEllipsis(this._timerModeLabel);
+    this._noEllipsis(this._timerTimeLabel);
+    timerCol1.add_child(this._timerModeLabel);
+    timerCol1.add_child(this._timerTimeLabel);
+
+    const timerInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    timerInfoBox.add_child(this._timerTile);
+    timerInfoBox.add_child(timerCol1);
+    this._timerCollapse.set_child(timerInfoBox);
+
+    const timerCol2 = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._timerModeBtn = new St.Button({
+      style_class: 'noir-island-timer-btn',
+      can_focus: false,
+    });
+    this._timerModeBtn.set_child(new St.Label({text: 'MODE'}));
+    this._timerModeBtn.connect('clicked', () => {
+      this._timerMode = this._timerMode === 'pomodoro' ? 'stopwatch' : 'pomodoro';
+      this._timerRunning = false;
+      this._timerStart = 0;
+      this._timerAccum = 0;
+      this._fillTimer();
+    });
+
+    this._timerResetBtn = new St.Button({
+      style_class: 'noir-island-timer-btn',
+      can_focus: false,
+    });
+    this._timerResetBtn.set_child(new St.Label({text: 'RESET'}));
+    this._timerResetBtn.connect('clicked', () => {
+      this._timerRunning = false;
+      this._timerStart = 0;
+      this._timerAccum = 0;
+      this._fillTimer();
+    });
+
+    this._timerPlayBtn = new St.Button({
+      style_class: 'noir-island-btn--round noir-island-timer-btn--play',
+      can_focus: false,
+    });
+    this._timerPlayBtn.set_child(new St.Icon({
+      icon_name: 'media-playback-start-symbolic',
+      icon_size: 16,
+    }));
+    this._timerPlayBtn.connect('clicked', () => {
+      if (this._timerRunning) {
+        this._timerAccum += monoMs() - this._timerStart;
+        this._timerRunning = false;
+      } else {
+        this._timerStart = monoMs();
+        this._timerRunning = true;
+      }
+      this._fillTimer();
+    });
+
+    timerCol2.add_child(this._timerModeBtn);
+    timerCol2.add_child(this._timerResetBtn);
+    timerCol2.add_child(this._timerPlayBtn);
+
+    this._timerRow.add_child(this._timerCollapse);
+    this._timerRow.add_child(this._hairline());
+    this._timerRow.add_child(timerCol2);
+    this._timerRow.add_child(this._hairline());
+    this._timerRow.add_child(this._navBox('timer'));
+    island.add_child(this._timerRow);
+  }
+
+  _navBox(currentMode) {
+    const box = new St.BoxLayout({
+      style_class: 'noir-island-nav-box',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const items = [
+      { id: 'media', icon: 'audio-x-generic-symbolic' },
+      { id: 'telemetry', icon: 'utilities-system-monitor-symbolic' },
+      { id: 'timer', icon: 'preferences-system-time-symbolic' },
+      { id: 'weather', icon: 'weather-clear-symbolic' },
+    ];
+    for (const item of items) {
+      const btn = new St.Button({
+        style_class: `noir-island-nav-btn ${item.id === currentMode ? 'noir-island-nav-btn--active' : ''}`,
+        can_focus: false,
+      });
+      const icon = new St.Icon({
+        icon_name: item.icon,
+        icon_size: 13,
+      });
+      btn.set_child(icon);
+      btn.connect('clicked', () => {
+        this._cardMode = item.id;
+        this._cardOpen = true;
+        this._wake();
+        this._render();
+      });
+      box.add_child(btn);
+    }
+    return box;
   }
 
   _hairline() {
@@ -1119,13 +1354,13 @@ export class Island {
         return 'pill';
       return this._hoverOn ? 'pill' : null;
     }
-    if (content === 'weather') {
+    if (content === 'weather' || content === 'telemetry' || content === 'timer') {
       const bangun = this._awake();
       return (this._cardOpen && bangun) ? 'card' : (this._hoverOn ? 'pill' : null);
     }
     if (content === 'idle') {
       const bangun = this._awake();
-      if (this._cardOpen && bangun && this._ambient()?.id === 'weather')
+      if (this._cardOpen && bangun)
         return 'card';
     }
     return this._hoverOn || this._privacy() ? 'pill' : null;
@@ -1164,13 +1399,15 @@ export class Island {
       return;
     this._stowed = true;
     this._stowAt = 0;
+    this._cardOpen = false;
+    this._cardMode = null;
     // Habis tidur, render berikutnya wajib menggambar lagi walau isinya sama
     // persis: actor-nya sendiri baru saja dimatikan.
     this._sig = null;
     this._armOutside(false);
     this._setActive(false);
     this._setClock(true);
-    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._progress])
+    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._telemetryRow, this._timerRow, this._progress])
       if (row) row.visible = false;
     const [x, y] = this._anchor(this._island.width);
     this._island.ease({
@@ -1266,7 +1503,7 @@ export class Island {
     this._fadeTo(level, content);
     this._setActive(true);
     this._setClock(level === 'pill');
-    this._armOutside(level === 'card' && (content === 'media' || content === 'weather'));
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer'));
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
@@ -1276,6 +1513,8 @@ export class Island {
     const rows = level !== 'card' ? [this._pillRow]
       : content === 'notif' ? [this._notifRow]
       : content === 'weather' ? [this._weatherRow]
+      : content === 'telemetry' ? [this._telemetryRow]
+      : content === 'timer' ? [this._timerRow]
       : [this._mediaRow, this._progress];
     for (const row of rows) {
       if (!row)
@@ -1351,6 +1590,7 @@ export class Island {
     if (!this._cardOpen)
       return;
     this._cardOpen = false;
+    this._cardMode = null;
     // Menyusut karena klik adalah aksi user: jam idle mulai ulang supaya pill
     // tidak ikut lenyap di tangan yang baru saja menutup card-nya.
     this._wake();
@@ -1874,6 +2114,12 @@ export class Island {
     if (state === 'weather') {
       return `weather|${this._weatherCityName ?? ''}|${this._weatherLabel}`;
     }
+    if (state === 'telemetry') {
+      return `telemetry|${Math.round(this._cpuUsage)}|${this._memUsedText}|${this._netRxText}`;
+    }
+    if (state === 'timer') {
+      return `timer|${this._timerMode}|${this._timerRunning}|${Math.floor(this._timerAccum / 1000)}`;
+    }
     const p = this._ambient();
     this._ambientId = p?.id ?? '-';
     this._ambientNilai = p ? p.nilai() : '';
@@ -1905,10 +2151,16 @@ export class Island {
       content = raw;
     // Card adalah permintaan eksplisit; kalau isinya sudah jadi idle, tidak ada
     // lagi yang bisa dibuka.
-    if (content === 'idle' && this._cardOpen && this._ambient()?.id === 'weather')
-      content = 'weather';
-    else if (content === 'idle')
+    if (this._cardOpen && content !== 'notif') {
+      if (this._cardMode === 'media' && !player)
+        content = 'telemetry';
+      else if (this._cardMode)
+        content = this._cardMode;
+      else if (content === 'idle')
+        content = (this._ambient()?.id === 'weather') ? 'weather' : 'telemetry';
+    } else if (content === 'idle') {
       this._cardOpen = false;
+    }
 
     // Isi dihitung dulu, baru level: _peekUntil yang dipasang di sini adalah
     // yang membuat level berikutnya jadi 'peek'.
@@ -1933,7 +2185,7 @@ export class Island {
         this._stow();
       return;
     }
-    this._armOutside(level === 'card' && content === 'media');
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer'));
 
     // Jam menit masuk ke kunci lukisan pill, bukan ke signature isi: pill harus
     // mengganti angkanya sekali semenet, tapi card media tidak boleh tergambar
@@ -1961,6 +2213,8 @@ export class Island {
     this._progress.visible = card && content === 'media';
     this._notifRow.visible = card && content === 'notif';
     this._weatherRow.visible = card && content === 'weather';
+    this._telemetryRow.visible = card && content === 'telemetry';
+    this._timerRow.visible = card && content === 'timer';
 
     if (card && content === 'notif')
       this._fillNotif(badge);
@@ -1968,6 +2222,10 @@ export class Island {
       this._fillMedia(player);
     else if (card && content === 'weather')
       this._fillWeather();
+    else if (card && content === 'telemetry')
+      this._fillTelemetry();
+    else if (card && content === 'timer')
+      this._fillTimer();
     else
       this._fillPill(player, content, jam, badge);
 
@@ -2249,6 +2507,109 @@ export class Island {
       } else {
         slot.box.visible = false;
       }
+    }
+  }
+
+  _sampleTelemetry() {
+    try {
+      const [okStat, bytesStat] = GLib.file_get_contents('/proc/stat');
+      if (okStat) {
+        const statStr = new TextDecoder().decode(bytesStat);
+        const parts = statStr.split('\n')[0].trim().split(/\s+/).slice(1).map(Number);
+        const total = parts.reduce((a, b) => a + b, 0);
+        const idle = parts[3] + (parts[4] || 0);
+        if (this._lastCpuTotal > 0 && total > this._lastCpuTotal) {
+          const diffTotal = total - this._lastCpuTotal;
+          const diffIdle = idle - this._lastCpuIdle;
+          this._cpuUsage = Math.max(0, Math.min(100, Math.round((1 - diffIdle / diffTotal) * 100)));
+        }
+        this._lastCpuTotal = total;
+        this._lastCpuIdle = idle;
+      }
+    } catch (_) {}
+
+    try {
+      const [okMem, bytesMem] = GLib.file_get_contents('/proc/meminfo');
+      if (okMem) {
+        const memStr = new TextDecoder().decode(bytesMem);
+        const totalMatch = memStr.match(/MemTotal:\s+(\d+)\s+kB/);
+        const availMatch = memStr.match(/MemAvailable:\s+(\d+)\s+kB/);
+        if (totalMatch && availMatch) {
+          const totalKb = parseInt(totalMatch[1], 10);
+          const availKb = parseInt(availMatch[1], 10);
+          const usedKb = totalKb - availKb;
+          this._memPct = Math.round((usedKb / totalKb) * 100);
+          this._memUsedText = `${(usedKb / 1048576).toFixed(1)}G`;
+          this._memTotalText = `${(totalKb / 1048576).toFixed(1)}G`;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const [okNet, bytesNet] = GLib.file_get_contents('/proc/net/dev');
+      if (okNet) {
+        const netStr = new TextDecoder().decode(bytesNet);
+        const lines = netStr.split('\n');
+        let rx = 0;
+        let tx = 0;
+        for (const line of lines) {
+          if (!line.includes(':') || line.includes('lo:'))
+            continue;
+          const cols = line.split(':')[1].trim().split(/\s+/).map(Number);
+          rx += cols[0] || 0;
+          tx += cols[8] || 0;
+        }
+        const now = monoMs();
+        if (this._lastNetSample > 0 && now > this._lastNetSample) {
+          const dtSec = (now - this._lastNetSample) / 1000;
+          const rxRate = Math.max(0, (rx - this._lastNetRx) / dtSec);
+          const txRate = Math.max(0, (tx - this._lastNetTx) / dtSec);
+          const fmtRate = (bytes) => {
+            if (bytes >= 1048576)
+              return `${(bytes / 1048576).toFixed(1)}M/s`;
+            return `${Math.round(bytes / 1024)}K/s`;
+          };
+          this._netRxText = fmtRate(rxRate);
+          this._netTxText = fmtRate(txRate);
+        }
+        this._lastNetRx = rx;
+        this._lastNetTx = tx;
+        this._lastNetSample = now;
+      }
+    } catch (_) {}
+  }
+
+  _fillTelemetry() {
+    this._sampleTelemetry();
+    this._telemCpuTitle.set_text(`V6 TURBO · ${this._cpuUsage}% CPU`);
+    this._telemCpuSub.set_text(`RAM ${this._memUsedText} / ${this._memTotalText} (${this._memPct}%)`);
+    this._telemMemText.set_text(`ERS BOOST: ${100 - this._cpuUsage}%`);
+    this._telemNetText.set_text(`TURBO ↓${this._netRxText || '0K/s'}`);
+  }
+
+  _fillTimer() {
+    let elapsed = this._timerAccum;
+    if (this._timerRunning)
+      elapsed += monoMs() - this._timerStart;
+
+    if (this._timerMode === 'pomodoro') {
+      const POMO_TOTAL = 25 * 60 * 1000;
+      const remainMs = Math.max(0, POMO_TOTAL - elapsed);
+      const remainSec = Math.floor(remainMs / 1000);
+      this._timerModeLabel.set_text(remainSec === 0 ? 'PIT STOP REQUIRED' : 'STINT FOCUS (POMODORO)');
+      this._timerTimeLabel.set_text(mmss(remainSec));
+    } else {
+      const sec = Math.floor(elapsed / 1000);
+      const ms = Math.floor((elapsed % 1000) / 100);
+      this._timerModeLabel.set_text('FERRARI CHRONOGRAPH');
+      this._timerTimeLabel.set_text(`${mmss(sec)}.${ms}`);
+    }
+
+    if (this._timerPlayBtn) {
+      this._timerPlayBtn.set_child(new St.Icon({
+        icon_name: this._timerRunning ? 'media-playback-pause-symbolic' : 'media-playback-start-symbolic',
+        icon_size: 16,
+      }));
     }
   }
 
@@ -3195,6 +3556,11 @@ export class Island {
         this._updateProgress(player);
       }
     }
+
+    if (this._telemetryRow && this._telemetryRow.visible)
+      this._fillTelemetry();
+    if (this._timerRow && this._timerRow.visible)
+      this._fillTimer();
 
     // Jam mundur mulai jalan saat memang tidak ada isi. Celah 1 dtk antara trek
     // terakhir dan trek berikutnya tidak boleh membuat island kedip masuk-keluar.
