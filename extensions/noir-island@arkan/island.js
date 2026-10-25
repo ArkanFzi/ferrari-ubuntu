@@ -177,6 +177,8 @@ const CARD_W = {
   clip: MEDIA_W,
   cmd: MEDIA_W,
   radio: MEDIA_W,
+  radar: MEDIA_W,
+  ignition: MEDIA_W,
 };
 
 const CARD_H = {
@@ -189,6 +191,8 @@ const CARD_H = {
   clip: MEDIA_H + PROGRESS_H,
   cmd: MEDIA_H + PROGRESS_H,
   radio: MEDIA_H + PROGRESS_H,
+  radar: MEDIA_H + PROGRESS_H,
+  ignition: MEDIA_H + PROGRESS_H,
 };
 
 const LEVEL_W = {
@@ -303,6 +307,13 @@ export class Island {
     this._cmdOutput = 'READY · PIT WALL V6';
     this._radioDuration = 0;
     this._radioStartTime = 0;
+    this._gForceX = 0;
+    this._gForceY = 0;
+    this._lastPointerX = 0;
+    this._lastPointerY = 0;
+    this._lastPointerTime = 0;
+    this._turboActive = false;
+    this._igniteState = 'READY';
     this._outsideId = 0;
     this._active = null;
     this._clockHiddenByUs = false;
@@ -891,18 +902,23 @@ export class Island {
     });
     this._telemCollapse.connect('clicked', () => this._collapse());
 
-    this._telemTile = new St.Bin({
-      style_class: 'noir-island-telem-tile',
-      x_align: Clutter.ActorAlign.FILL,
+    this._telemTile = new St.Widget({
+      style_class: 'noir-island-gforce-box',
       y_align: Clutter.ActorAlign.CENTER,
+      layout_manager: new Clutter.BinLayout(),
     });
-    this._telemIcon = new St.Icon({
-      icon_name: 'utilities-system-monitor-symbolic',
-      icon_size: 20,
+    this._gForceRing = new St.Widget({
+      style_class: 'noir-island-gforce-ring',
       x_align: Clutter.ActorAlign.CENTER,
       y_align: Clutter.ActorAlign.CENTER,
     });
-    this._telemTile.set_child(this._telemIcon);
+    this._gForceDot = new St.Widget({
+      style_class: 'noir-island-gforce-dot',
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._telemTile.add_child(this._gForceRing);
+    this._telemTile.add_child(this._gForceDot);
 
     const telemCol1 = new St.BoxLayout({
       vertical: true,
@@ -1390,6 +1406,144 @@ export class Island {
     this._radioRow.add_child(this._hairline());
     this._radioRow.add_child(this._navBox('radio'));
     island.add_child(this._radioRow);
+
+    // --------------------------------------------------- Track Map Mini-Radar
+    this._radarRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._radarCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._radarCollapse.connect('clicked', () => this._collapse());
+
+    this._radarTile = new St.Bin({
+      style_class: 'noir-island-radar-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radarIcon = new St.Icon({
+      icon_name: 'find-location-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radarTile.set_child(this._radarIcon);
+
+    const radarCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._radarTitle = this._label('noir-island-title');
+    this._radarSub = this._label('noir-island-line');
+    this._noEllipsis(this._radarTitle);
+    this._noEllipsis(this._radarSub);
+    radarCol1.add_child(this._radarTitle);
+    radarCol1.add_child(this._radarSub);
+
+    const radarInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    radarInfoBox.add_child(this._radarTile);
+    radarInfoBox.add_child(radarCol1);
+    this._radarCollapse.set_child(radarInfoBox);
+
+    this._radarCarsBox = new St.BoxLayout({
+      style_class: 'noir-island-radar-track',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+
+    this._radarRow.add_child(this._radarCollapse);
+    this._radarRow.add_child(this._hairline());
+    this._radarRow.add_child(this._radarCarsBox);
+    this._radarRow.add_child(this._hairline());
+    this._radarRow.add_child(this._navBox('radar'));
+    island.add_child(this._radarRow);
+
+    // --------------------------------------------------- Ferrari Ignition HUD
+    this._ignitionRow = new St.BoxLayout({
+      style_class: 'noir-island-pad noir-island-row',
+      y_expand: true,
+      visible: false,
+    });
+    this._igniteCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._igniteCollapse.connect('clicked', () => this._collapse());
+
+    this._igniteTile = new St.Bin({
+      style_class: 'noir-island-ignite-tile',
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._igniteIcon = new St.Icon({
+      icon_name: 'security-high-symbolic',
+      icon_size: 20,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._igniteTile.set_child(this._igniteIcon);
+
+    const igniteCol1 = new St.BoxLayout({
+      vertical: true,
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._igniteTitle = this._label('noir-island-title');
+    this._igniteSub = this._label('noir-island-line');
+    this._noEllipsis(this._igniteTitle);
+    this._noEllipsis(this._igniteSub);
+    igniteCol1.add_child(this._igniteTitle);
+    igniteCol1.add_child(this._igniteSub);
+
+    const igniteInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
+    igniteInfoBox.add_child(this._igniteTile);
+    igniteInfoBox.add_child(igniteCol1);
+    this._igniteCollapse.set_child(igniteInfoBox);
+
+    const igniteCol2 = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._igniteBtn = new St.Button({
+      style_class: 'noir-island-ignite-btn',
+      can_focus: false,
+    });
+    this._igniteBtn.set_child(new St.Label({text: 'START ENGINE'}));
+    this._igniteBtn.connect('clicked', () => {
+      this._igniteState = this._igniteState === 'IGNITED' ? 'READY' : 'IGNITED';
+      this._playSfx('ignite');
+      this._fillIgnition();
+    });
+
+    igniteCol2.add_child(this._igniteBtn);
+
+    this._ignitionRow.add_child(this._igniteCollapse);
+    this._ignitionRow.add_child(this._hairline());
+    this._ignitionRow.add_child(igniteCol2);
+    this._ignitionRow.add_child(this._hairline());
+    this._ignitionRow.add_child(this._navBox('ignition'));
+    island.add_child(this._ignitionRow);
+  }
+
+  _playSfx(type) {
+    try {
+      const sounds = {
+        click: 'button-toggle-on',
+        open: 'dialog-information',
+        ignite: 'audio-volume-change',
+      };
+      const name = sounds[type] || 'button-toggle-on';
+      GLib.spawn_command_line_async(`canberra-gtk-play -i ${name}`);
+    } catch (_) {}
   }
 
   _navBox(currentMode) {
@@ -1401,10 +1555,12 @@ export class Island {
       { id: 'media', icon: 'audio-x-generic-symbolic' },
       { id: 'telemetry', icon: 'utilities-system-monitor-symbolic' },
       { id: 'timer', icon: 'preferences-system-time-symbolic' },
+      { id: 'radar', icon: 'find-location-symbolic' },
       { id: 'drop', icon: 'folder-download-symbolic' },
       { id: 'clip', icon: 'edit-copy-symbolic' },
       { id: 'cmd', icon: 'utilities-terminal-symbolic' },
       { id: 'radio', icon: 'audio-input-microphone-symbolic' },
+      { id: 'ignition', icon: 'security-high-symbolic' },
       { id: 'weather', icon: 'weather-clear-symbolic' },
     ];
     for (const item of items) {
@@ -1414,10 +1570,11 @@ export class Island {
       });
       const icon = new St.Icon({
         icon_name: item.icon,
-        icon_size: 12,
+        icon_size: 11,
       });
       btn.set_child(icon);
       btn.connect('clicked', () => {
+        this._playSfx('click');
         this._cardMode = item.id;
         this._cardOpen = true;
         this._wake();
@@ -1631,6 +1788,23 @@ export class Island {
     if (!mon || !this._island)
       return;
     const [x, y] = global.get_pointer();
+    const now = monoMs();
+    if (this._lastPointerTime > 0 && now > this._lastPointerTime) {
+      const dt = (now - this._lastPointerTime) / 1000;
+      if (dt > 0.05) {
+        const vx = (x - this._lastPointerX) / dt;
+        const vy = (y - this._lastPointerY) / dt;
+        const targetGx = Math.max(-12, Math.min(12, vx * 0.008));
+        const targetGy = Math.max(-12, Math.min(12, vy * 0.008));
+        this._gForceX = this._gForceX * 0.7 + targetGx * 0.3;
+        this._gForceY = this._gForceY * 0.7 + targetGy * 0.3;
+        if (this._gForceDot)
+          this._gForceDot.set_translation(Math.round(this._gForceX), Math.round(this._gForceY), 0);
+      }
+    }
+    this._lastPointerX = x;
+    this._lastPointerY = y;
+    this._lastPointerTime = now;
     const bawah = mon.y + (Main.panel.height || 0);
     // Sumbu hover = sumbu tempat island benar-benar digambar, bukan tengah
     // monitor: kalau dua hal ini beda, zona bangun meleset dari bentuk yang
@@ -1709,7 +1883,8 @@ export class Island {
       return this._hoverOn ? 'pill' : null;
     }
     if (content === 'weather' || content === 'telemetry' || content === 'timer' ||
-        content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio') {
+        content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio' ||
+        content === 'radar' || content === 'ignition') {
       const bangun = this._awake();
       return (this._cardOpen && bangun) ? 'card' : (this._hoverOn ? 'pill' : null);
     }
@@ -1762,7 +1937,7 @@ export class Island {
     this._armOutside(false);
     this._setActive(false);
     this._setClock(true);
-    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._telemetryRow, this._timerRow, this._dropRow, this._clipRow, this._cmdRow, this._radioRow, this._progress])
+    for (const row of [this._pillRow, this._mediaRow, this._notifRow, this._weatherRow, this._telemetryRow, this._timerRow, this._dropRow, this._clipRow, this._cmdRow, this._radioRow, this._radarRow, this._ignitionRow, this._progress])
       if (row) row.visible = false;
     const [x, y] = this._anchor(this._island.width);
     this._island.ease({
@@ -1858,7 +2033,7 @@ export class Island {
     this._fadeTo(level, content);
     this._setActive(true);
     this._setClock(level === 'pill');
-    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio'));
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio' || content === 'radar' || content === 'ignition'));
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
@@ -1874,6 +2049,8 @@ export class Island {
       : content === 'clip' ? [this._clipRow]
       : content === 'cmd' ? [this._cmdRow]
       : content === 'radio' ? [this._radioRow]
+      : content === 'radar' ? [this._radarRow]
+      : content === 'ignition' ? [this._ignitionRow]
       : [this._mediaRow, this._progress];
     for (const row of rows) {
       if (!row)
@@ -2491,6 +2668,12 @@ export class Island {
     if (state === 'radio') {
       return `radio|${this._micOn}|${this._radioDuration}`;
     }
+    if (state === 'radar') {
+      return `radar|${this._radarCarsBox?.get_n_children?.() ?? 0}`;
+    }
+    if (state === 'ignition') {
+      return `ignition|${this._igniteState}`;
+    }
     const p = this._ambient();
     this._ambientId = p?.id ?? '-';
     this._ambientNilai = p ? p.nilai() : '';
@@ -2556,7 +2739,7 @@ export class Island {
         this._stow();
       return;
     }
-    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio'));
+    this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio' || content === 'radar' || content === 'ignition'));
 
     // Jam menit masuk ke kunci lukisan pill, bukan ke signature isi: pill harus
     // mengganti angkanya sekali semenet, tapi card media tidak boleh tergambar
@@ -2590,6 +2773,8 @@ export class Island {
     this._clipRow.visible = card && content === 'clip';
     this._cmdRow.visible = card && content === 'cmd';
     this._radioRow.visible = card && content === 'radio';
+    this._radarRow.visible = card && content === 'radar';
+    this._ignitionRow.visible = card && content === 'ignition';
 
     if (card && content === 'notif')
       this._fillNotif(badge);
@@ -2609,6 +2794,10 @@ export class Island {
       this._fillCmd();
     else if (card && content === 'radio')
       this._fillRadio();
+    else if (card && content === 'radar')
+      this._fillRadar();
+    else if (card && content === 'ignition')
+      this._fillIgnition();
     else
       this._fillPill(player, content, jam, badge);
 
@@ -2960,13 +3149,27 @@ export class Island {
         this._lastNetSample = now;
       }
     } catch (_) {}
+
+    if (this._cpuUsage > 60) {
+      if (this._island && !this._turboActive) {
+        this._turboActive = true;
+        this._island.add_style_class_name('noir-island--turbo-flame');
+      }
+    } else {
+      if (this._turboActive) {
+        this._turboActive = false;
+        if (this._island)
+          this._island.remove_style_class_name('noir-island--turbo-flame');
+      }
+    }
   }
 
   _fillTelemetry() {
     this._sampleTelemetry();
     this._telemCpuTitle.set_text(`V6 TURBO · ${this._cpuUsage}% CPU`);
     this._telemCpuSub.set_text(`RAM ${this._memUsedText} / ${this._memTotalText} (${this._memPct}%)`);
-    this._telemMemText.set_text(`ERS BOOST: ${100 - this._cpuUsage}%`);
+    const gLat = (Math.abs(this._gForceX) * 0.15).toFixed(1);
+    this._telemMemText.set_text(`G-FORCE: ${gLat}G · ERS: ${100 - this._cpuUsage}%`);
     this._telemNetText.set_text(`TURBO ↓${this._netRxText || '0K/s'}`);
   }
 
@@ -3104,6 +3307,51 @@ export class Island {
         this._radioMuteBtn.add_style_class_name('noir-island-radio-mute-btn--muted');
       else
         this._radioMuteBtn.remove_style_class_name('noir-island-radio-mute-btn--muted');
+    }
+  }
+
+  _fillRadar() {
+    this._radarTitle.set_text('AUTODROMO MONZA · RADAR');
+    let winList = [];
+    try {
+      const ws = global.workspace_manager?.get_active_workspace();
+      if (ws) {
+        winList = ws.list_windows().filter(w => !w.is_skip_taskbar());
+      }
+    } catch (_) {}
+
+    this._radarSub.set_text(`${winList.length} mobil aktif di sirkuit`);
+    if (this._radarCarsBox) {
+      this._radarCarsBox.destroy_all_children();
+      for (let i = 0; i < Math.min(4, winList.length); i++) {
+        const win = winList[i];
+        let name = win.get_wm_class() || win.get_title() || 'Car';
+        name = name.split('.').pop().slice(0, 8);
+        const carBtn = new St.Button({
+          style_class: 'noir-island-radar-car',
+          can_focus: false,
+        });
+        carBtn.set_child(new St.Label({text: `🏎 ${name}`}));
+        carBtn.connect('clicked', () => {
+          this._playSfx('click');
+          win.activate(global.get_current_time());
+        });
+        this._radarCarsBox.add_child(carBtn);
+      }
+    }
+  }
+
+  _fillIgnition() {
+    if (this._igniteState === 'IGNITED') {
+      this._igniteTitle.set_text('V6 HYBRID POWER UNIT ONLINE');
+      this._igniteSub.set_text('SISTEM DIOTORISASI · MODE RACE ACTIVE');
+      if (this._igniteBtn)
+        this._igniteBtn.set_child(new St.Label({text: 'PIT STOP'}));
+    } else {
+      this._igniteTitle.set_text('SCUDERIA SECURITY · ENGINE START');
+      this._igniteSub.set_text('SIAPKAN SIDIK JARI / OTORISASI');
+      if (this._igniteBtn)
+        this._igniteBtn.set_child(new St.Label({text: 'START ENGINE'}));
     }
   }
 
@@ -4068,6 +4316,10 @@ export class Island {
         this._radioDuration = 0;
       this._fillRadio();
     }
+    if (this._radarRow && this._radarRow.visible)
+      this._fillRadar();
+    if (this._ignitionRow && this._ignitionRow.visible)
+      this._fillIgnition();
     this._syncClip();
 
     // Jam mundur mulai jalan saat memang tidak ada isi. Celah 1 dtk antara trek

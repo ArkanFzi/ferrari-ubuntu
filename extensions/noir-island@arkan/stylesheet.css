@@ -618,3 +618,110 @@
   color: #aaaaaa;
   box-shadow: none;
 }
+
+/* Active Aero DRS Wing & Flame */
+.noir-island--turbo-flame {
+  box-shadow: 0 0 12px rgba(218, 41, 28, 0.75), 0 0 24px rgba(254, 211, 0, 0.35);
+  border: 1px solid rgba(254, 211, 0, 0.85);
+}
+
+.noir-island-wing {
+  width: 4px;
+  height: 28px;
+  background-color: #222222;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.noir-island-wing--active {
+  background-color: #da291c;
+  box-shadow: 0 0 6px #da291c;
+}
+
+/* F1 G-Force Accelerometer Matrix */
+.noir-island-gforce-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(20, 20, 20, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  margin-right: 10px;
+}
+
+.noir-island-gforce-ring {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.4);
+}
+
+.noir-island-gforce-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: #da291c;
+  box-shadow: 0 0 6px #da291c;
+}
+
+/* Track Map Mini-Radar */
+.noir-island-radar-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(0, 230, 118, 0.12);
+  color: #00e676;
+  box-shadow: inset 0 0 0 1px rgba(0, 230, 118, 0.35);
+  margin-right: 10px;
+}
+
+.noir-island-radar-track {
+  spacing: 4px;
+  y-align: center;
+}
+
+.noir-island-radar-car {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.noir-island-radar-car:hover {
+  background-color: rgba(218, 41, 28, 0.35);
+  color: #fed300;
+  box-shadow: inset 0 0 0 1px #da291c;
+}
+
+/* Ferrari Ignition Sudo HUD */
+.noir-island-ignite-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: rgba(254, 211, 0, 0.18);
+  color: #fed300;
+  box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.5);
+  margin-right: 10px;
+}
+
+.noir-island-ignite-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  background-color: #da291c;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  box-shadow: 0 0 10px rgba(218, 41, 28, 0.7);
+}
+
+.noir-island-ignite-btn:hover {
+  background-color: #ff3322;
+  box-shadow: 0 0 14px rgba(255, 51, 34, 0.9);
+}
+
+.noir-island-ignite-btn:active {
+  background-color: #9e1b11;
+}
