@@ -68,7 +68,8 @@ const PEEK_W = 340;
 // Tinggi pill dan peek: satu baris. Card punya tingginya sendiri (CARD_H).
 const PILL_H = 34;
 const MEDIA_W = 580;
-const MEDIA_H = 64;
+const MEDIA_H = 96;
+const DASH_H = 64;
 const NOTIF_W = 460;
 const NOTIF_H = 72;
 // Band tempat rel progres hidup: 12 px untuk pointer, 3 px untuk mata. Bar
@@ -184,15 +185,15 @@ const CARD_W = {
 const CARD_H = {
   media: MEDIA_H + PROGRESS_H,
   notif: NOTIF_H,
-  weather: MEDIA_H + PROGRESS_H,
-  telemetry: MEDIA_H + PROGRESS_H,
-  timer: MEDIA_H + PROGRESS_H,
-  drop: MEDIA_H + PROGRESS_H,
-  clip: MEDIA_H + PROGRESS_H,
-  cmd: MEDIA_H + PROGRESS_H,
-  radio: MEDIA_H + PROGRESS_H,
-  radar: MEDIA_H + PROGRESS_H,
-  ignition: MEDIA_H + PROGRESS_H,
+  weather: DASH_H + PROGRESS_H,
+  telemetry: DASH_H + PROGRESS_H,
+  timer: DASH_H + PROGRESS_H,
+  drop: DASH_H + PROGRESS_H,
+  clip: DASH_H + PROGRESS_H,
+  cmd: DASH_H + PROGRESS_H,
+  radio: DASH_H + PROGRESS_H,
+  radar: DASH_H + PROGRESS_H,
+  ignition: DASH_H + PROGRESS_H,
 };
 
 const LEVEL_W = {
@@ -597,15 +598,16 @@ export class Island {
     pill.add_child(this._pillBadge);
     island.add_child(this._pillRow);
 
-    // Media: artwork, tiga baris teks (judul/artis/album), transport.
+    // Media: 3-Tier Cockpit Layout (Header & Controls, Full-Width Lyrics, Navigation Dock)
     this._mediaRow = new St.BoxLayout({
-      style_class: 'noir-island-pad noir-island-row',
+      style_class: 'noir-island-pad noir-island-media-card',
+      vertical: true,
       y_expand: true,
       visible: false,
     });
     this._mediaRow.set_clip_to_allocation(true);
     this._cover = new St.Bin({
-      style_class: 'noir-island-cover',
+      style_class: 'noir-island-cover noir-island-cover--cockpit',
       x_align: Clutter.ActorAlign.FILL,
       // CENTER, bukan FILL: tinggi 44 px di CSS hanya batas bawah, jadi Bin yang
       // fill ikut meregang setinggi barisnya (thumb jadi persegi panjang).
@@ -666,17 +668,20 @@ export class Island {
     this._mTitle = this._label('noir-island-title');
     this._mArtist = this._label('noir-island-line');
     this._mAlbum = this._label('noir-island-faint');
-    this._mLyric = new St.Label({
-      style_class: 'noir-island-lyric-active',
-      y_align: Clutter.ActorAlign.CENTER,
-    });
-    this._mLyric.clutter_text.line_wrap = false;
-    this._mLyric.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-    this._mLyric.visible = false;
+    this._mAlbum.visible = false;
     col.add_child(this._mTitle);
     col.add_child(this._mArtist);
     col.add_child(this._mAlbum);
-    col.add_child(this._mLyric);
+
+    this._mediaCollapse = new St.Button({
+      style_class: 'noir-island-pillbtn',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.FILL,
+      y_align: Clutter.ActorAlign.CENTER,
+      can_focus: false,
+    });
+    this._mediaCollapse.set_child(col);
+    this._mediaCollapse.connect('clicked', () => this._collapse());
 
     this._time = new St.Label({
       style_class: 'noir-island-time',
@@ -690,33 +695,58 @@ export class Island {
       'noir-island-btn--round noir-island-btn--play');
     this._btnNext = this._iconButton('media-skip-forward-symbolic',
       () => this._transport('Next'), 'noir-island-btn--round');
-    const ctl = new St.BoxLayout({style_class: 'noir-island-ctl'});
-    ctl.add_child(this._hairline());
+    const ctl = new St.BoxLayout({
+      style_class: 'noir-island-ctl',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
     ctl.add_child(this._time);
     ctl.add_child(this._btnPrev);
     ctl.add_child(this._btnPlay);
     ctl.add_child(this._btnNext);
-    ctl.add_child(this._hairline());
-    ctl.add_child(this._navBox('media'));
 
-    this._mediaRow.add_child(this._cover);
-    // Kolom teks dibungkus St.Button: klik di judul/artis/album adalah jalan
-    // pulang dari card, simetris dengan klik pill yang membukanya. Bukan tombol
-    // ✕ baru, dan bukan outside-click: _armOutside bergantung pada captured-event
-    // stage yang di Wayland tidak terkirim, jadi satu-satunya affordance yang
-    // terbukti bekerja adalah klik pada isi card itu sendiri. Kelasnya pakai
-    // milik pill supaya tidak ada chrome tambahan sama sekali.
-    this._mediaCollapse = new St.Button({
-      style_class: 'noir-island-pillbtn',
+    // Tier 1: Header (Artwork, Title/Artist, Transport Controls)
+    const topRow = new St.BoxLayout({
+      style_class: 'noir-island-media-top',
       x_expand: true,
-      x_align: Clutter.ActorAlign.FILL,
       y_align: Clutter.ActorAlign.CENTER,
-      can_focus: false,
     });
-    this._mediaCollapse.set_child(col);
-    this._mediaCollapse.connect('clicked', () => this._collapse());
-    this._mediaRow.add_child(this._mediaCollapse);
-    this._mediaRow.add_child(ctl);
+    topRow.add_child(this._cover);
+    topRow.add_child(this._mediaCollapse);
+    topRow.add_child(ctl);
+
+    // Tier 2: Dedicated Full-Width Lyric Strip (100% width)
+    this._lyricRow = new St.BoxLayout({
+      style_class: 'noir-island-lyric-strip',
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+      reactive: true,
+    });
+    this._lyricRow.connect('button-press-event', () => {
+      this._collapse();
+      return Clutter.EVENT_STOP;
+    });
+    this._mLyric = new St.Label({
+      style_class: 'noir-island-lyric-active',
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._mLyric.clutter_text.line_wrap = false;
+    this._mLyric.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+    this._mLyric.visible = true;
+    this._lyricRow.add_child(this._mLyric);
+
+    // Tier 3: Centered Dock Navigation
+    const navRow = new St.BoxLayout({
+      style_class: 'noir-island-media-dock',
+      x_expand: true,
+      x_align: Clutter.ActorAlign.CENTER,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    navRow.add_child(this._navBox('media'));
+
+    this._mediaRow.add_child(topRow);
+    this._mediaRow.add_child(this._lyricRow);
+    this._mediaRow.add_child(navRow);
     island.add_child(this._mediaRow);
 
     this._progress = new St.Widget({
@@ -1590,6 +1620,7 @@ export class Island {
     const hintLabel = new St.Label({
       style_class: 'noir-island-nav-hint',
       text: '',
+      visible: false,
     });
     this._noEllipsis(hintLabel);
 
@@ -1622,9 +1653,11 @@ export class Island {
       btn.set_child(icon);
       btn.connect('enter-event', () => {
         hintLabel.set_text(item.label);
+        hintLabel.visible = true;
       });
       btn.connect('leave-event', () => {
         hintLabel.set_text('');
+        hintLabel.visible = false;
       });
       btn.connect('clicked', () => {
         this._playSfx('click');
@@ -2958,18 +2991,8 @@ export class Island {
   // adalah baris sekunder — album lebih dulu, lalu artis — sesuai urutan
   // prioritas; judul selalu tinggal sendiri dan memotong dirinya dengan elipsis.
   _fitText() {
-    const textW = this._capFor('card', 'media') - MEDIA_CHROME_W;
-    const muat = (l) => {
-      const [, nat] = l.get_preferred_width(-1);
-      return !Number.isFinite(nat) || nat <= textW;
-    };
-    if (this._mLyric && this._mLyric.visible) {
-      this._mAlbum.visible = false;
-      this._mArtist.visible = false;
-    } else {
-      this._mAlbum.visible = !!this._mAlbum.text && muat(this._mAlbum);
-      this._mArtist.visible = muat(this._mArtist);
-    }
+    this._mArtist.visible = true;
+    this._mAlbum.visible = false;
   }
 
   _updateProgress(player) {
@@ -3507,7 +3530,9 @@ export class Island {
     const player = this._pick();
     if (player?.meta?.title) {
       const m = player.meta;
-      this._mTitle.set_text(m.artist ? `${m.title} · ${m.artist}` : m.title);
+      this._mTitle.set_text(m.title);
+      if (this._mArtist)
+        this._mArtist.set_text(m.artist || player.identity);
     }
 
     if (!this._mLyric.text || !this._mLyric.visible) {
@@ -3548,10 +3573,7 @@ export class Island {
   _updateLyrics(player, elapsed) {
     if (!this._mLyric || !player?.meta?.title) {
       if (this._mLyric && this._mLyric.visible) {
-        this._mLyric.visible = false;
-        if (player?.meta?.title)
-          this._mTitle.set_text(player.meta.title);
-        this._fitText();
+        this._mLyric.set_text('');
       }
       return;
     }
@@ -3573,11 +3595,9 @@ export class Island {
 
     // Lirik tidak ditemukan / kosong
     if (!this._currentLyrics || !Array.isArray(this._currentLyrics) || this._currentLyrics.length === 0) {
-      if (this._mLyric.visible) {
-        this._mLyric.visible = false;
-        if (player?.meta?.title)
-          this._mTitle.set_text(player.meta.title);
-        this._fitText();
+      const fallback = m.album ? `♪ ${m.album} ♪` : '♪ Maranello Sound System ♪';
+      if (this._mLyric.text !== fallback) {
+        this._slideLyric(fallback);
       }
       return;
     }
@@ -3605,10 +3625,9 @@ export class Island {
         this._slideLyric(active.text);
       }
     } else if (this._mLyric.visible) {
-      this._mLyric.visible = false;
-      if (player?.meta?.title)
-        this._mTitle.set_text(player.meta.title);
-      this._fitText();
+      const fallback = m.album ? `♪ ${m.album} ♪` : '♪ Maranello Sound System ♪';
+      if (this._mLyric.text !== fallback)
+        this._slideLyric(fallback);
     }
   }
 

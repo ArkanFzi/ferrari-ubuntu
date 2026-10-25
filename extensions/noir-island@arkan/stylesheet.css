@@ -321,23 +321,52 @@
   color: #f2f2f2;
 }
 
-/* Lyrics & Interactive Cover (Maranello GT) */
+/* Media Card 3-Tier Cockpit Layout & Full-Width Lyrics (Maranello GT) */
+.noir-island-media-card {
+  padding: 4px 14px 2px 14px;
+  spacing: 3px;
+}
+
+.noir-island-media-top {
+  spacing: 8px;
+}
+
+.noir-island-cover--cockpit {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.noir-island-lyric-strip {
+  margin: 1px 0;
+  padding: 1px 8px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 .noir-island-lyric-active {
   font-family: Inter;
   font-size: 11px;
   font-weight: 600;
   font-style: italic;
   color: #fed300;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .noir-island-lyric-muted {
   font-family: Inter;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   font-style: italic;
-  color: #a8a8a8;
-  line-height: 1.25;
+  color: rgba(242, 242, 242, 0.45);
+  line-height: 1.2;
+}
+
+.noir-island-media-dock {
+  margin: 1px 0;
 }
 
 /* F1 Rev-Light Shift LEDs Strip (Scuderia Cockpit) */
