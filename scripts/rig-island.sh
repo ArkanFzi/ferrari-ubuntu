@@ -23,10 +23,10 @@ RES=1280x800
 HOST_DISPLAY=${DISPLAY:-:1}
 # Root repo diturunkan dari lokasi skrip, bukan dari path absolut: salinan di
 # mesin lain (atau worktree) harus mengukur kode yang ada di depannya, bukan
-# kode di /home/arkan.
+# kode di direktori home user.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$ROOT/extensions/noir-island@arkan
-STUB=/home/arkan/.local/share/gnome-shell/extensions/noir-island@arkan/extension.js
+STUB="${HOME}/.local/share/gnome-shell/extensions/noir-island@arkan/extension.js"
 UUID=noir-island@arkan
 
 # ---- bersih-bersih -----------------------------------------------------------
@@ -39,9 +39,10 @@ pkill -x Xephyr 2>/dev/null
 sleep 1
 
 rm -rf "$RIG"
-mkdir -p "$RIG"/{shots,home/.config/dconf,home/.cache,home/Desktop,home/Templates}
-EXTDIR="$RIG/home/.local/share/gnome-shell/extensions/$UUID"
-BUILD="$RIG/home/.local/share/noir-island/builds/build-R"
+RHOME="$RIG/sandbox"
+mkdir -p "$RIG"/shots "$RHOME"/{.config/dconf,.cache,Desktop,Templates}
+EXTDIR="$RHOME/.local/share/gnome-shell/extensions/$UUID"
+BUILD="$RHOME/.local/share/noir-island/builds/build-R"
 mkdir -p "$EXTDIR/schemas" "$BUILD"
 
 cp "$REPO/island.js" "$BUILD/island.js"
@@ -49,13 +50,13 @@ cp "$REPO/stylesheet.css" "$EXTDIR/"
 cp "$REPO/schemas/org.gnome.shell.extensions.noir-island.gschema.xml" "$EXTDIR/schemas/"
 cp "$REPO/metadata.json" "$EXTDIR/"
 cp "$STUB" "$EXTDIR/extension.js"
-printf '%s' "$BUILD" > "$RIG/home/.local/share/noir-island/CURRENT"
+printf '%s' "$BUILD" > "$RHOME/.local/share/noir-island/CURRENT"
 glib-compile-schemas "$EXTDIR/schemas"
 # schema juga masuk path standar rig supaya gsettings CLI bisa menyetel knob
-mkdir -p "$RIG/home/.local/share/glib-2.0/schemas"
+mkdir -p "$RHOME/.local/share/glib-2.0/schemas"
 cp "$REPO/schemas/org.gnome.shell.extensions.noir-island.gschema.xml" \
-  "$RIG/home/.local/share/glib-2.0/schemas/"
-glib-compile-schemas "$RIG/home/.local/share/glib-2.0/schemas"
+  "$RHOME/.local/share/glib-2.0/schemas/"
+glib-compile-schemas "$RHOME/.local/share/glib-2.0/schemas"
 node --check "$BUILD/island.js" || { echo "SINTAKS GAGAL"; exit 1; }
 
 # ---- kalender EDS tiruan ----------------------------------------------------
@@ -68,9 +69,9 @@ node --check "$BUILD/island.js" || { echo "SINTAKS GAGAL"; exit 1; }
 # ditulis lebih dulu, lalu besok, lalu yang terdekat. Kalau island mengambil
 # baris pertama, bukan acara pertama yang belum lewat, teks pilnya terbaca
 # salah dan assertionnya menangkap itu.
-mkdir -p "$RIG/home/.config/evolution/sources" \
-  "$RIG/home/.local/share/evolution/calendar/system"
-cat > "$RIG/home/.config/evolution/sources/system-calendar.source" <<'SRC'
+mkdir -p "$RHOME/.config/evolution/sources" \
+  "$RHOME/.local/share/evolution/calendar/system"
+cat > "$RHOME/.config/evolution/sources/system-calendar.source" <<'SRC'
 [Data Source]
 DisplayName=Personal
 Enabled=true
@@ -103,7 +104,7 @@ STAMP=$(date -u +%Y%m%dT%H%M00Z)
   printf 'BEGIN:VEVENT\nUID:rig-besok@noir\nDTSTAMP:%s\nDTSTART:%s\nDTEND:%s\nSUMMARY:Kelas besok\nEND:VEVENT\n' "$STAMP" "$BESOK" "$BESOK_A"
   printf 'BEGIN:VEVENT\nUID:rig-rapat@noir\nDTSTAMP:%s\nDTSTART:%s\nDTEND:%s\nSUMMARY:Rapat R7\nEND:VEVENT\n' "$STAMP" "$RAPAT" "$RAPAT_A"
   printf 'END:VCALENDAR\n'
-} > "$RIG/home/.local/share/evolution/calendar/system/calendar.ics"
+} > "$RHOME/.local/share/evolution/calendar/system/calendar.ics"
 R7_JAM=$(date -d '+3 hours' +%H:%M)
 echo "R7-TEKS: $R7_JAM Rapat R7"
 
@@ -277,15 +278,15 @@ echo "AMBIEN=${AMBIEN:-0}"
 [ "${AMBIEN:-0}" = "1" ] && gsettings set org.gnome.shell.extensions.noir-island ambient-clock true
 dconf dump /
 SEED
-HOME=$RIG/home XDG_CONFIG_HOME=$RIG/home/.config XDG_DATA_HOME=$RIG/home/.local/share \
-XDG_CACHE_HOME=$RIG/home/.cache \
+HOME=$RHOME XDG_CONFIG_HOME=$RHOME/.config XDG_DATA_HOME=$RHOME/.local/share \
+XDG_CACHE_HOME=$RHOME/.cache \
 dbus-run-session -- bash "$RIG/seed.sh" > "$RIG/seed.out" 2> "$RIG/seed.err"
 echo "== seed:"; cat "$RIG/seed.out"
 echo "== seed.err:"; head -3 "$RIG/seed.err"
-[ -f "$RIG/home/.config/dconf/user" ] && echo "SEED-FILE: ADA" || echo "SEED-FILE: HILANG"
+[ -f "$RHOME/.config/dconf/user" ] && echo "SEED-FILE: ADA" || echo "SEED-FILE: HILANG"
 
 cat > "$RIG/run.sh" <<EOF
-export HOME=$RIG/home
+export HOME=$RHOME
 export XDG_CONFIG_HOME=\$HOME/.config
 export XDG_DATA_HOME=\$HOME/.local/share
 export XDG_CACHE_HOME=\$HOME/.cache
@@ -380,13 +381,13 @@ sleep 2
 # HOME/HOME-XDG WAJIB sudah benar SEBELUM dbus-daemon lahir, bukan hanya di dalam
 # run.sh: service yang diaktifkan dbus-run-session (ca.desrt.dconf) mewarisi
 # environment DAEMON-nya, bukan environment klien. Tanpa prefix ini dconf-service
-# berjalan dengan HOME=/home/arkan, jadi setiap tulisan settings dari dalam rig
+# berjalan dengan HOME=$HOME, jadi setiap tulisan settings dari dalam rig
 # mendarat di dconf desktop sungguhan (efek samping yang sudah sempat terjadi),
 # sementara gnome-shell di dalam rig membaca berkas db milik HOME-nya sendiri yang
 # tidak pernah berubah. Hasil terukur: sinyal changed::show-banners tiba, nilainya
 # tetap lama, dan baris 'dnd on' tidak pernah ada.
-HOME=$RIG/home XDG_CONFIG_HOME=$RIG/home/.config XDG_DATA_HOME=$RIG/home/.local/share \
-XDG_CACHE_HOME=$RIG/home/.cache \
+HOME=$RHOME XDG_CONFIG_HOME=$RHOME/.config XDG_DATA_HOME=$RHOME/.local/share \
+XDG_CACHE_HOME=$RHOME/.cache \
 dbus-run-session -- bash "$RIG/run.sh" > "$RIG/shell.out" 2>&1 &
 RB=$!
 
@@ -991,8 +992,8 @@ fi
 # EventsAddedOrUpdated dengan prefiks uid sumber baru dalam hitungan detik.
 parkir
 tidur_island || echo "  (sebelum R7B island belum tidur: $(baris_terakhir))"
-SRC2="$RIG/home/.config/evolution/sources/kedua.source"
-ICS2="$RIG/home/.local/share/evolution/calendar/kedua/calendar.ics"
+SRC2="$RHOME/.config/evolution/sources/kedua.source"
+ICS2="$RHOME/.local/share/evolution/calendar/kedua/calendar.ics"
 mkdir -p "$(dirname "$ICS2")"
 cat > "$SRC2" <<SRC
 [Data Source]

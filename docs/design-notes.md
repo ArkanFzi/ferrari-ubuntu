@@ -863,7 +863,7 @@ sendiri, jadi angka badge punya saluran observasi sebelum pixel sempat dipercaya
 **Tulisan settings dari luar sesi rig tidak pernah sampai ke shell, dan causes
 damage.** `dbus-run-session` mengaktifkan `ca.desrt.dconf` dengan HOME **milik
 dbus-daemon**, bukan milik klien. Sesi rig lahir dari `dbus-run-session -- bash
-run.sh` tanpa prefix HOME, jadi dconf-service berjalan dengan `HOME=/home/arkan`:
+run.sh` tanpa prefix HOME, jadi dconf-service berjalan dengan `HOME=$HOME`:
 setiap tulisan dari dalam rig mendarat di `~/.config/dconf/user` desktop asli
 (efek samping yang sempat terjadi dan sudah dikembalikan), sementara gnome-shell di
 dalam rig membaca db milik HOME-nya sendiri. Yang terukur di layar: sinyal

@@ -1208,7 +1208,8 @@ export class Island {
     this._dropOpenBtn.set_child(new St.Label({text: 'DOWNLOADS'}));
     this._dropOpenBtn.connect('clicked', () => {
       try {
-        Gio.AppInfo.launch_default_for_uri('file:///home/arkan/Downloads', null);
+        const dlDir = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) || GLib.get_home_dir();
+        Gio.AppInfo.launch_default_for_uri(GLib.filename_to_uri(dlDir, null), null);
       } catch (_) {}
     });
 
@@ -3340,7 +3341,8 @@ export class Island {
   _execCmd(cmdType) {
     if (cmdType === 'git') {
       try {
-        const [ok, out] = GLib.spawn_command_line_sync('git -C /home/arkan/ferrari-ubuntu status -s');
+        const repoDir = `${GLib.get_home_dir()}/ferrari-ubuntu`;
+        const [ok, out] = GLib.spawn_command_line_sync(`git -C "${repoDir}" status -s`);
         if (ok) {
           const str = new TextDecoder().decode(out).trim();
           const lines = str ? str.split('\n').length : 0;
@@ -3463,7 +3465,7 @@ export class Island {
     log(`noir-island: lirik cari "${m.title}" (${m.artist})`);
     try {
       const msg = Soup.Message.new('GET', url);
-      msg.request_headers.append('User-Agent', 'noir-island/1.0 (https://github.com/arkan/noir-island)');
+      msg.request_headers.append('User-Agent', 'noir-island/1.0 (https://github.com/ferrari-ubuntu/noir-island)');
       this._soupSession.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
         this._lyricsFetching = null;
         try {
