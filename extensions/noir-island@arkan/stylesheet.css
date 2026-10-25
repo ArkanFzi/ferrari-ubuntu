@@ -128,6 +128,8 @@
   border-radius: 10px;
   background-color: rgba(255, 255, 255, 0.05);
   background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
   color: rgba(242, 242, 242, 0.30);
 }
 
@@ -213,6 +215,7 @@
   border-radius: 15px;
   background-color: #da291c;
   color: #ffffff;
+  box-shadow: 0 0 8px rgba(218, 41, 28, 0.45);
 }
 
 .noir-island-btn--play:hover {
@@ -336,16 +339,17 @@
   height: 36px;
   min-width: 36px;
   min-height: 36px;
-  border-radius: 8px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 
 .noir-island-lyric-strip {
-  margin-top: 6px;
+  margin-top: 5px;
   margin-bottom: 4px;
   padding: 2px 10px;
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(254, 211, 0, 0.04);
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.16);
 }
 
 .noir-island-lyric-active {
@@ -355,6 +359,7 @@
   font-style: italic;
   color: #fed300;
   line-height: 1.25;
+  text-shadow: 0 0 8px rgba(254, 211, 0, 0.35);
 }
 
 .noir-island-lyric-muted {
@@ -366,15 +371,57 @@
   line-height: 1.25;
 }
 
+.noir-island-lyric-eq {
+  spacing: 2px;
+  margin-left: 6px;
+  y-align: center;
+}
+
+.noir-island-lyric-eq-bar {
+  width: 2px;
+  height: 8px;
+  min-height: 3px;
+  border-radius: 1px;
+  background-color: #fed300;
+  box-shadow: 0 0 4px rgba(254, 211, 0, 0.6);
+}
+
 .noir-island-media-dock {
   margin-top: 2px;
   margin-bottom: 1px;
 }
 
-/* F1 Rev-Light Shift LEDs Strip (Scuderia Cockpit) */
+/* F1 Telemetry Badges & Rev-Light Strip (Scuderia Cockpit) */
+.noir-island-f1-header {
+  spacing: 6px;
+  margin-bottom: 2px;
+  y-align: center;
+}
+
+.noir-island-f1-badge {
+  font-family: Titillium Web;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 0px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.noir-island-f1-badge--drs {
+  background-color: rgba(0, 230, 118, 0.15);
+  color: #00e676;
+  box-shadow: inset 0 0 0 1px rgba(0, 230, 118, 0.35);
+}
+
+.noir-island-f1-badge--ers {
+  background-color: rgba(254, 211, 0, 0.15);
+  color: #fed300;
+  box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.35);
+}
+
 .noir-island-rev-box {
   spacing: 3px;
-  margin-bottom: 2px;
 }
 
 .noir-island-rev-led {

@@ -608,9 +608,7 @@ export class Island {
     this._mediaRow.set_clip_to_allocation(true);
     this._cover = new St.Bin({
       style_class: 'noir-island-cover noir-island-cover--cockpit',
-      x_align: Clutter.ActorAlign.FILL,
-      // CENTER, bukan FILL: tinggi 44 px di CSS hanya batas bawah, jadi Bin yang
-      // fill ikut meregang setinggi barisnya (thumb jadi persegi panjang).
+      x_align: Clutter.ActorAlign.CENTER,
       y_align: Clutter.ActorAlign.CENTER,
       reactive: true,
       track_hover: true,
@@ -650,6 +648,10 @@ export class Island {
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
     });
+    const telemHeader = new St.BoxLayout({
+      style_class: 'noir-island-f1-header',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
     this._revBox = new St.BoxLayout({
       style_class: 'noir-island-rev-box',
       y_align: Clutter.ActorAlign.CENTER,
@@ -664,7 +666,21 @@ export class Island {
       this._revLeds.push({led, type: ledType});
       this._revBox.add_child(led);
     }
-    col.add_child(this._revBox);
+    telemHeader.add_child(this._revBox);
+
+    this._drsBadge = new St.Label({
+      style_class: 'noir-island-f1-badge noir-island-f1-badge--drs',
+      text: 'DRS',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._ersBadge = new St.Label({
+      style_class: 'noir-island-f1-badge noir-island-f1-badge--ers',
+      text: 'ERS 99%',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    telemHeader.add_child(this._drsBadge);
+    telemHeader.add_child(this._ersBadge);
+    col.add_child(telemHeader);
     this._mTitle = this._label('noir-island-title');
     this._mArtist = this._label('noir-island-line');
     this._mAlbum = this._label('noir-island-faint');
@@ -735,6 +751,21 @@ export class Island {
     this._mLyric.clutter_text.ellipsize = Pango.EllipsizeMode.END;
     this._mLyric.visible = true;
     this._lyricRow.add_child(this._mLyric);
+
+    this._lyricEq = new St.BoxLayout({
+      style_class: 'noir-island-lyric-eq',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._lyricEqBars = [];
+    for (let i = 0; i < 3; i++) {
+      const bar = new St.Widget({
+        style_class: 'noir-island-lyric-eq-bar',
+        y_align: Clutter.ActorAlign.CENTER,
+      });
+      this._lyricEqBars.push(bar);
+      this._lyricEq.add_child(bar);
+    }
+    this._lyricRow.add_child(this._lyricEq);
 
     // Tier 3: Centered Dock Navigation
     const navRow = new St.BoxLayout({
@@ -3617,7 +3648,15 @@ export class Island {
     if (!playing) {
       for (const {led} of this._revLeds)
         led.set_opacity(25);
+      if (this._drsBadge) {
+        this._drsBadge.set_text('DRS OFF');
+        this._drsBadge.set_style('color: rgba(242, 242, 242, 0.35); background-color: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);');
+      }
       return;
+    }
+    if (this._drsBadge) {
+      this._drsBadge.set_text('DRS ACT');
+      this._drsBadge.set_style('color: #00e676; background-color: rgba(0, 230, 118, 0.18); box-shadow: inset 0 0 0 1px rgba(0, 230, 118, 0.4);');
     }
     const cur = elapsed ?? (player.status === 'Playing'
       ? player.pos + player.rate * (monoMs() - player.posAt) / 1000
@@ -3625,6 +3664,10 @@ export class Island {
 
     // Skala volume player (0.2 .. 1.0)
     const vol = typeof player.volume === 'number' ? Math.max(0.2, Math.min(1.0, player.volume)) : 1.0;
+    if (this._ersBadge) {
+      const volPct = Math.round(vol * 100);
+      this._ersBadge.set_text(`ERS ${volPct}%`);
+    }
 
     // 1. Pita Bass / Low (LED 0, 1, 2 - Hijau):
     // Denyut ketukan drum (tempo ~120 BPM = 2 Hz), power wave
@@ -3669,47 +3712,63 @@ export class Island {
   }
 
   _updateEq(player) {
-    if (!this._pillEq || !this._pillEq.visible || !this._eqBars)
-      return;
     const playing = player?.status === 'Playing';
-    if (!playing) {
-      for (let i = 0; i < 4; i++) {
-        this._eqBars[i].ease({
-          height: 3,
-          duration: TICK_MS,
-          mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-        });
+    const cur = (player?.pos + player?.rate * (monoMs() - (player?.posAt || 0)) / 1000) || (monoMs() / 1000);
+    const vol = typeof player?.volume === 'number' ? Math.max(0.3, Math.min(1.0, player.volume)) : 1.0;
+
+    // 1. Equalizer di pill
+    if (this._pillEq && this._pillEq.visible && this._eqBars) {
+      if (!playing) {
+        for (let i = 0; i < 4; i++) {
+          this._eqBars[i].ease({
+            height: 3,
+            duration: TICK_MS,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+          });
+        }
+      } else {
+        const b0 = Math.round((3 + 9 * Math.pow(Math.abs(Math.sin(cur * Math.PI * 2)), 2)) * vol);
+        const b1 = Math.round((4 + 11 * Math.abs(Math.sin(cur * 4.5 + 0.8))) * vol);
+        const isVocal = this._mLyric && this._mLyric.visible &&
+          !this._mLyric.text?.startsWith('♪') && !this._mLyric.text?.includes('...');
+        const b2 = Math.round((isVocal ? 6 + 8 * Math.abs(Math.cos(cur * 7.2)) : 3 + 5 * Math.abs(Math.sin(cur * 3.5))) * vol);
+        const b3 = Math.round((3 + 8 * Math.pow(Math.abs(Math.cos(cur * Math.PI * 4 + 0.5)), 2)) * vol);
+
+        const heights = [
+          Math.max(3, Math.min(14, b0)),
+          Math.max(3, Math.min(15, b1)),
+          Math.max(3, Math.min(14, b2)),
+          Math.max(3, Math.min(12, b3)),
+        ];
+
+        for (let i = 0; i < 4; i++) {
+          this._eqBars[i].ease({
+            height: heights[i],
+            duration: TICK_MS,
+            mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+          });
+        }
       }
-      return;
     }
-    const cur = (player.pos + player.rate * (monoMs() - player.posAt) / 1000) || (monoMs() / 1000);
-    const vol = typeof player.volume === 'number' ? Math.max(0.3, Math.min(1.0, player.volume)) : 1.0;
 
-    // 4 Bar Equalizer disinkronkan ke 4 pita frekuensi:
-    // Bar 0: Sub-bass (hentakan ritmik berat)
-    const b0 = Math.round((3 + 9 * Math.pow(Math.abs(Math.sin(cur * Math.PI * 2)), 2)) * vol);
-    // Bar 1: Mid-bass (ritme pengiring)
-    const b1 = Math.round((4 + 11 * Math.abs(Math.sin(cur * 4.5 + 0.8))) * vol);
-    // Bar 2: Vocal Presence (dinamika nada vokal)
-    const isVocal = this._mLyric && this._mLyric.visible &&
-      !this._mLyric.text?.startsWith('♪') && !this._mLyric.text?.includes('...');
-    const b2 = Math.round((isVocal ? 6 + 8 * Math.abs(Math.cos(cur * 7.2)) : 3 + 5 * Math.abs(Math.sin(cur * 3.5))) * vol);
-    // Bar 3: Treble / Shimmer
-    const b3 = Math.round((3 + 8 * Math.pow(Math.abs(Math.cos(cur * Math.PI * 4 + 0.5)), 2)) * vol);
-
-    const heights = [
-      Math.max(3, Math.min(14, b0)),
-      Math.max(3, Math.min(15, b1)),
-      Math.max(3, Math.min(14, b2)),
-      Math.max(3, Math.min(12, b3)),
-    ];
-
-    for (let i = 0; i < 4; i++) {
-      this._eqBars[i].ease({
-        height: heights[i],
-        duration: TICK_MS,
-        mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
-      });
+    // 2. Micro Equalizer di Lirik Strip (Cockpit Card)
+    if (this._mediaRow && this._mediaRow.visible && this._lyricEqBars && this._lyricEqBars.length === 3) {
+      if (!playing) {
+        for (let i = 0; i < 3; i++) {
+          this._lyricEqBars[i].ease({
+            height: 3,
+            duration: TICK_MS,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+          });
+        }
+      } else {
+        const lb0 = Math.max(3, Math.min(10, Math.round((3 + 7 * Math.pow(Math.abs(Math.sin(cur * Math.PI * 2)), 2)) * vol)));
+        const lb1 = Math.max(3, Math.min(10, Math.round((4 + 6 * Math.abs(Math.sin(cur * 4.5 + 0.8))) * vol)));
+        const lb2 = Math.max(3, Math.min(10, Math.round((3 + 7 * Math.pow(Math.abs(Math.cos(cur * Math.PI * 4 + 0.5)), 2)) * vol)));
+        this._lyricEqBars[0].ease({ height: lb0, duration: TICK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+        this._lyricEqBars[1].ease({ height: lb1, duration: TICK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+        this._lyricEqBars[2].ease({ height: lb2, duration: TICK_MS, mode: Clutter.AnimationMode.EASE_OUT_QUAD });
+      }
     }
   }
 
@@ -4090,7 +4149,7 @@ export class Island {
       return;
     this._coverIcon.visible = !path;
     this._cover.set_style(path
-      ? `background-image: url("${path}");`
+      ? `background-image: url("${path}"); background-size: cover; background-position: center;`
       : 'background-image: none;');
   }
 
