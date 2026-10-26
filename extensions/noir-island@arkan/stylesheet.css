@@ -453,6 +453,11 @@
   box-shadow: 0 0 5px rgba(41, 121, 255, 0.8);
 }
 
+.noir-island-rev-led--flash {
+  background-color: #7c4dff !important;
+  box-shadow: 0 0 8px rgba(124, 77, 255, 1.0) !important;
+}
+
 /* Dynamic Equalizer in Pill */
 .noir-island-eq {
   spacing: 2px;
@@ -575,6 +580,60 @@
   color: #fed300;
   box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.35);
   margin-right: 10px;
+}
+
+/* 4-Tire F1 Thermal Heatmap */
+.noir-island-tyre-box {
+  spacing: 4px;
+  y-align: center;
+  margin-right: 6px;
+}
+
+.noir-island-tyre-axle {
+  spacing: 4px;
+}
+
+.noir-island-tyre {
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.noir-island-tyre--cold {
+  background-color: #00b4d8;
+  box-shadow: 0 0 4px rgba(0, 180, 216, 0.8);
+}
+
+.noir-island-tyre--opt {
+  background-color: #00e676;
+  box-shadow: 0 0 4px rgba(0, 230, 118, 0.8);
+}
+
+.noir-island-tyre--hot {
+  background-color: #da291c;
+  box-shadow: 0 0 5px rgba(218, 41, 28, 0.9);
+}
+
+.noir-island-tyre-label {
+  font-family: Titillium Web;
+  font-size: 8px;
+  font-weight: 700;
+  color: #fed300;
+}
+
+.noir-island-radio-btn {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background-color: rgba(255, 61, 0, 0.18);
+  color: #ff3d00;
+  box-shadow: inset 0 0 0 1px rgba(255, 61, 0, 0.45);
+}
+
+.noir-island-radio-btn:hover {
+  background-color: rgba(255, 61, 0, 0.32);
+  color: #ffffff;
 }
 
 .noir-island-telem-col {

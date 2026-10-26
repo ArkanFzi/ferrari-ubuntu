@@ -317,6 +317,7 @@ export class Island {
     this._igniteState = 'READY';
     this._outsideId = 0;
     this._active = null;
+    this._lastLevel = 'pill';
     this._clockHiddenByUs = false;
 
     this._settings = context.getSettings();
@@ -339,14 +340,36 @@ export class Island {
     this._active = false;
     this._island.visible = false;
 
+    const onRailScroll = (actor, event) => {
+      const dir = event.get_scroll_direction();
+      let step = 0;
+      if (dir === Clutter.ScrollDirection.UP || dir === Clutter.ScrollDirection.LEFT)
+        step = -1;
+      else if (dir === Clutter.ScrollDirection.DOWN || dir === Clutter.ScrollDirection.RIGHT)
+        step = 1;
+      else if (dir === Clutter.ScrollDirection.SMOOTH) {
+        const [, dy] = event.get_scroll_delta();
+        if (dy < -0.1) step = -1;
+        else if (dy > 0.1) step = 1;
+      }
+      if (step !== 0) {
+        this._stepNavMode(step);
+        return Clutter.EVENT_STOP;
+      }
+      return Clutter.EVENT_PROPAGATE;
+    };
+
     this._railLeft = new St.Widget({
       style_class: 'noir-island-horizon-rail',
-      reactive: false,
+      reactive: true,
     });
+    this._railLeft.connect('scroll-event', onRailScroll);
+
     this._railRight = new St.Widget({
       style_class: 'noir-island-horizon-rail',
-      reactive: false,
+      reactive: true,
     });
+    this._railRight.connect('scroll-event', onRailScroll);
     Main.layoutManager.addChrome(this._railLeft, {affectsInputRegion: false, trackFullscreen: true});
     Main.layoutManager.addChrome(this._railRight, {affectsInputRegion: false, trackFullscreen: true});
 
@@ -1025,6 +1048,49 @@ export class Island {
     this._telemTile.add_child(this._gForceRing);
     this._telemTile.add_child(this._gForceDot);
 
+    this._telemTyresBox = new St.BoxLayout({
+      style_class: 'noir-island-tyre-box',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const colLeft = new St.BoxLayout({
+      vertical: true,
+      style_class: 'noir-island-tyre-axle',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._tyreFL = new St.Widget({
+      style_class: 'noir-island-tyre noir-island-tyre--opt',
+    });
+    this._tyreRL = new St.Widget({
+      style_class: 'noir-island-tyre noir-island-tyre--opt',
+    });
+    colLeft.add_child(this._tyreFL);
+    colLeft.add_child(this._tyreRL);
+
+    this._tyreTempLabel = new St.Label({
+      style_class: 'noir-island-tyre-label',
+      text: '55°C',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._noEllipsis(this._tyreTempLabel);
+
+    const colRight = new St.BoxLayout({
+      vertical: true,
+      style_class: 'noir-island-tyre-axle',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._tyreFR = new St.Widget({
+      style_class: 'noir-island-tyre noir-island-tyre--opt',
+    });
+    this._tyreRR = new St.Widget({
+      style_class: 'noir-island-tyre noir-island-tyre--opt',
+    });
+    colRight.add_child(this._tyreFR);
+    colRight.add_child(this._tyreRR);
+
+    this._telemTyresBox.add_child(colLeft);
+    this._telemTyresBox.add_child(this._tyreTempLabel);
+    this._telemTyresBox.add_child(colRight);
+
     const telemCol1 = new St.BoxLayout({
       vertical: true,
       x_expand: true,
@@ -1038,6 +1104,7 @@ export class Island {
 
     const telemInfoBox = new St.BoxLayout({style_class: 'noir-island-row'});
     telemInfoBox.add_child(this._telemTile);
+    telemInfoBox.add_child(this._telemTyresBox);
     telemInfoBox.add_child(telemCol1);
     this._telemCollapse.set_child(telemInfoBox);
 
@@ -1506,6 +1573,16 @@ export class Island {
 
     radioCol2.add_child(this._radioMuteBtn);
 
+    this._radioBoxBtn = new St.Button({
+      style_class: 'noir-island-radio-btn',
+      can_focus: false,
+    });
+    this._radioBoxBtn.set_child(new St.Label({text: 'BOX BOX'}));
+    this._radioBoxBtn.connect('clicked', () => {
+      this._playSfx('radio');
+    });
+    radioCol2.add_child(this._radioBoxBtn);
+
     this._radioRow.add_child(this._radioCollapse);
     this._radioRow.add_child(this._hairline());
     this._radioRow.add_child(radioCol2);
@@ -1646,9 +1723,11 @@ export class Island {
         click: 'button-toggle-on',
         open: 'dialog-information',
         ignite: 'audio-volume-change',
+        drs: 'radio-lights',
+        radio: 'radio-box',
       };
       const name = sounds[type] || 'button-toggle-on';
-      GLib.spawn_command_line_async(`canberra-gtk-play -i ${name}`);
+      GLib.spawn_command_line_async(`canberra-gtk-play -i ${name} -d noir-island`);
     } catch (_) {}
   }
 
@@ -1672,6 +1751,25 @@ export class Island {
     const box = new St.BoxLayout({
       style_class: 'noir-island-nav-box',
       y_align: Clutter.ActorAlign.CENTER,
+      reactive: true,
+    });
+    box.connect('scroll-event', (actor, event) => {
+      const dir = event.get_scroll_direction();
+      let step = 0;
+      if (dir === Clutter.ScrollDirection.UP || dir === Clutter.ScrollDirection.LEFT)
+        step = -1;
+      else if (dir === Clutter.ScrollDirection.DOWN || dir === Clutter.ScrollDirection.RIGHT)
+        step = 1;
+      else if (dir === Clutter.ScrollDirection.SMOOTH) {
+        const [, dy] = event.get_scroll_delta();
+        if (dy < -0.1) step = -1;
+        else if (dy > 0.1) step = 1;
+      }
+      if (step !== 0) {
+        this._stepNavMode(step);
+        return Clutter.EVENT_STOP;
+      }
+      return Clutter.EVENT_PROPAGATE;
     });
     const items = [
       { id: 'media', icon: 'audio-x-generic-symbolic' },
@@ -2205,6 +2303,20 @@ export class Island {
     this._setActive(true);
     this._setClock(level === 'pill');
     this._armOutside(level === 'card' && (content === 'media' || content === 'weather' || content === 'telemetry' || content === 'timer' || content === 'drop' || content === 'clip' || content === 'cmd' || content === 'radio' || content === 'radar' || content === 'ignition'));
+
+    if (level === 'card' && this._lastLevel !== 'card') {
+      this._playSfx('drs');
+      if (this._drsBadge) {
+        this._drsBadge.set_text('DRS OPEN');
+        this._drsBadge.set_style('color: #00e676; background-color: rgba(0, 230, 118, 0.22); box-shadow: inset 0 0 0 1px rgba(0, 230, 118, 0.5);');
+      }
+    } else if (level !== 'card' && this._lastLevel === 'card') {
+      if (this._drsBadge) {
+        this._drsBadge.set_text('DRS OFF');
+        this._drsBadge.set_style('color: rgba(242, 242, 242, 0.35); background-color: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);');
+      }
+    }
+    this._lastLevel = level;
   }
 
   // Teks yang muncul mendadak di tengah morph ukuran terlihat pop. Isi state
@@ -3105,13 +3217,15 @@ export class Island {
   _fillNotif(badge) {
     const {src, n} = this._showing;
     const critical = n.urgency >= Urgency.CRITICAL;
-    this._nKicker.set_text(String(src.title || 'Notifikasi').toUpperCase());
-    // Nama aplikasi jadi merah hanya kalau urgensi critical: rosso penanda
-    // yang berarti (TIER 0), bukan hiasan.
-    if (critical)
+    if (critical) {
+      this._nKicker.set_text('📻 TEAM RADIO: RACE ENGINEER');
       this._nKicker.add_style_class_name('noir-island-kicker--hot');
-    else
+      if (this._shownNotif !== n)
+        this._playSfx('radio');
+    } else {
+      this._nKicker.set_text(String(src.title || 'Notifikasi').toUpperCase());
       this._nKicker.remove_style_class_name('noir-island-kicker--hot');
+    }
     this._nTitle.set_text(n.title || '');
     this._nBody.set_text(this._oneLine(n.body || '', BODY_MAX));
     this._badge.visible = badge > 0;
@@ -3325,6 +3439,27 @@ export class Island {
     }
   }
 
+  _getCpuTemp() {
+    try {
+      const paths = [
+        '/sys/class/thermal/thermal_zone3/temp',
+        '/sys/class/thermal/thermal_zone0/temp',
+        '/sys/class/thermal/thermal_zone2/temp',
+      ];
+      for (const p of paths) {
+        if (GLib.file_test(p, GLib.FileTest.EXISTS)) {
+          const [ok, data] = GLib.file_get_contents(p);
+          if (ok) {
+            const raw = parseInt(new TextDecoder().decode(data).trim(), 10);
+            if (!isNaN(raw) && raw > 0)
+              return Math.round(raw > 1000 ? raw / 1000 : raw);
+          }
+        }
+      }
+    } catch (_) {}
+    return Math.round(42 + ((this._cpuUsage || 0) * 0.45));
+  }
+
   _fillTelemetry() {
     this._sampleTelemetry();
     this._telemCpuTitle.set_text(`V6 TURBO · ${this._cpuUsage}% CPU`);
@@ -3332,6 +3467,28 @@ export class Island {
     const gLat = (Math.abs(this._gForceX) * 0.15).toFixed(1);
     this._telemMemText.set_text(`G-FORCE: ${gLat}G · ERS: ${100 - this._cpuUsage}%`);
     this._telemNetText.set_text(`TURBO ↓${this._netRxText || '0K/s'}`);
+
+    const baseTemp = this._getCpuTemp();
+    if (this._tyreTempLabel)
+      this._tyreTempLabel.set_text(`${baseTemp}°C`);
+    const tyres = [
+      { widget: this._tyreFL, temp: baseTemp - 1 },
+      { widget: this._tyreFR, temp: baseTemp + 2 },
+      { widget: this._tyreRL, temp: baseTemp - 2 },
+      { widget: this._tyreRR, temp: baseTemp + 1 },
+    ];
+    for (const { widget, temp } of tyres) {
+      if (!widget) continue;
+      widget.remove_style_class_name('noir-island-tyre--cold');
+      widget.remove_style_class_name('noir-island-tyre--opt');
+      widget.remove_style_class_name('noir-island-tyre--hot');
+      if (temp < 48)
+        widget.add_style_class_name('noir-island-tyre--cold');
+      else if (temp <= 75)
+        widget.add_style_class_name('noir-island-tyre--opt');
+      else
+        widget.add_style_class_name('noir-island-tyre--hot');
+    }
   }
 
   _fillTimer() {
@@ -3720,8 +3877,10 @@ export class Island {
       return;
     const playing = player?.status === 'Playing';
     if (!playing) {
-      for (const {led} of this._revLeds)
+      for (const {led} of this._revLeds) {
+        led.remove_style_class_name('noir-island-rev-led--flash');
         led.set_opacity(25);
+      }
       if (this._drsBadge) {
         this._drsBadge.set_text('DRS OFF');
         this._drsBadge.set_style('color: rgba(242, 242, 242, 0.35); background-color: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);');
@@ -3729,7 +3888,7 @@ export class Island {
       return;
     }
     if (this._drsBadge) {
-      this._drsBadge.set_text('DRS ACT');
+      this._drsBadge.set_text(this._cardOpen ? 'DRS OPEN' : 'DRS ACT');
       this._drsBadge.set_style('color: #00e676; background-color: rgba(0, 230, 118, 0.18); box-shadow: inset 0 0 0 1px rgba(0, 230, 118, 0.4);');
     }
     const cur = elapsed ?? (player.status === 'Playing'
@@ -3742,6 +3901,24 @@ export class Island {
       const volPct = Math.round(vol * 100);
       this._ersBadge.set_text(`ERS ${volPct}%`);
     }
+
+    // Overdrive Flash: Jika CPU > 85%, shift flash simultan di 13,000 RPM
+    const isOverdrive = (this._cpuUsage || 0) > 85;
+    if (isOverdrive) {
+      if (this._drsBadge) {
+        this._drsBadge.set_text('SHIFT 13K');
+        this._drsBadge.set_style('color: #fed300; background-color: rgba(254, 211, 0, 0.22); box-shadow: inset 0 0 0 1px rgba(254, 211, 0, 0.5);');
+      }
+      const flashOn = (monoMs() % 160) < 80;
+      for (const {led} of this._revLeds) {
+        led.add_style_class_name('noir-island-rev-led--flash');
+        led.set_opacity(flashOn ? 255 : 40);
+      }
+      return;
+    }
+
+    for (const {led} of this._revLeds)
+      led.remove_style_class_name('noir-island-rev-led--flash');
 
     // 1. Pita Bass / Low (LED 0, 1, 2 - Hijau):
     // Denyut ketukan drum (tempo ~120 BPM = 2 Hz), power wave
