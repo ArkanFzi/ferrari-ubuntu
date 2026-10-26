@@ -11,17 +11,19 @@ dependensi pihak ketiga. Bukan fork besar tema ikon/GTK.
 
 ## Tampilan
 
-![Desktop noir: panel ramping dengan cluster rev-light dan RACE di kanan atas, dock full-height di kiri, jam analog di desktop](docs/gambar/desktop.png)
+![Desktop noir: panel ramping dengan cluster rev-light dan RACE di kanan atas, Horizon Telemetry Rail, Dynamic Island F1 Cockpit, dock full-height di kiri, jam analog di desktop](docs/gambar/desktop.png)
+
+| 🏎️ Dynamic Island: Media & F1 Rev-Light Sync | 🛞 F1 Telemetry & 4-Tire Thermal Heatmap |
+|---|---|
+| ![Dynamic Island Media Card dengan lirik tersinkronisasi dan DRS OPEN](docs/gambar/island-media.png) | ![Dynamic Island Telemetry dengan 4-Tire Heatmap, G-Force Radar, dan Manettino](docs/gambar/island-telemetry.png) |
 
 | Quick Settings: kartu berbingkai rosso, baterai dan mode daya | Rail sub-panel di sisi dock (`Super+R`) |
 |---|---|
 | ![Quick Settings noir dengan aksen Rosso Corsa](docs/gambar/quick-settings.png) | ![Rail noir berisi aplikasi terkini dan folder tersering](docs/gambar/rail.png) |
 
-Ketiga gambar dirender pada 1920x1080 dari rig Xephyr (:9) dengan salinan dconf
-tersendiri, jadi sesi kerja tidak ikut tersentuh. Nama jaringan Wi-Fi/VPN dan
-isi riwayat pada rail disensor — datanya berasal dari mesin pengembang. Layar
-ambient `noir-clock` belum ditampilkan karena idle monitor X11 di dalam
-Xephyr melapor hitung-mundur, sehingga veil tidak pernah naik di rig.
+Seluruh gambar dirender pada 1920x1080 dari rig Xephyr dengan salinan dconf
+tersendiri, sehingga sesi kerja pengembang tidak ikut tersentuh dan data pribadi
+bersih dari tangkapan layar. Nama jaringan Wi-Fi/VPN dan isi riwayat pada rail disensor.
 
 ```
 ferrari-ubuntu/
@@ -154,12 +156,22 @@ wpctl status | grep -A2 canberra                    # stream [active]
   layar ambient noir-clock tidak boleh naik.
 - **Dock**: kiri, full-height, fixed, ikon 48 px, indikator `DASHES`, dasar
   `#121212` dengan blur; mount + trash tampil sebagai seksi pemisah.
-- **Island** (noir-island): pill kecil click-through di tengah bawah panel;
-  melebar jadi kartu now-playing (artwork, judul/artis/album, progres, prev /
-  play-pause / next) begitu ada `org.mpris.MediaPlayer2.*` berstatus Playing,
-  dan didahulukan kartu notifikasi (ikon sumber, body, badge `+N`, tombol
-  Tutup/Buka yang bisa diklik). Prioritas NOTIF > MEDIA > IDLE; tidak naik
-  selama jendela fullscreen, kecuali urgensi critical.
+- **Island** (noir-island): pill cerdas di tengah bawah panel terhubung dengan
+  **Horizon Telemetry Rail** (garis telemetri merah dengan denyut audio-reaktif).
+  Mendukung 10 mode Manettino interaktif (Media, Telemetry, Chrono Timer, G-Force Radar,
+  Drop Zone, Clipboard, Command Terminal, Team Radio, Engine Ignition, Weather):
+  - **DRS Aero Flap Morph & SFX**: transisi pembukaan card memicu audio pneumatik
+    F1 (`radio-lights.oga`) dan status badge `DRS OPEN` / `DRS OFF`.
+  - **4-Tire Pirelli Heatmap**: 4 ban balap (FL, FR, RL, RR) membaca suhu CPU termal riil
+    dari `/sys/class/thermal` dengan status warna Pirelli (Cold Cyan `<48°C`,
+    Optimal Green `48–75°C`, Blistering Red `>75°C`).
+  - **13,000 RPM Shift-Light Overdrive**: 10 Rev-LEDs beralih ke strobo simultan
+    racing violet `#7c4dff` dan badge `SHIFT 13K` saat CPU $>85\%$.
+  - **Team Radio HUD**: notifikasi kritis memicu banner `[📻 TEAM RADIO: RACE ENGINEER]`,
+    audio statis radio balap (`radio-box.oga`), serta tombol interaktif `BOX BOX`.
+  - **Virtual Manettino Scroll**: gestur scroll mouse di atas rail atau dock langsung
+    mengganti mode berkendara secara instan disertai tactile mechanical click.
+  - Prioritas tampilan: NOTIF > MEDIA > AMBIENT (Agenda / Cuaca / Jam) > IDLE.
 - **Tipografi**: Inter 10 untuk UI, Titillium Web untuk angka (cluster, jam),
   Hack untuk monospace; weekday + detik di jam panel; persen baterai tampil.
 - **Jendela**: layout tombol `close,minimize,maximize:` macOS, Super+Tab untuk
