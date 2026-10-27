@@ -179,6 +179,10 @@
   box-shadow: 0 0 6px rgba(218, 41, 28, 0.65);
 }
 
+.noir-island-notif-col {
+  min-width: 140px;
+}
+
 .noir-island-actions {
   spacing: 6px;
   margin-right: 14px;
@@ -188,6 +192,7 @@
    .noir-island-actions. */
 .noir-island-acts {
   spacing: 6px;
+  max-width: 280px;
 }
 
 .noir-island-btn {
@@ -253,6 +258,7 @@
    per kartu, dan di sini pintunya sudah "Buka". */
 .noir-island-btn--act {
   background-color: rgba(255, 255, 255, 0.07);
+  max-width: 140px;
 }
 
 .noir-island-btn--act:hover {

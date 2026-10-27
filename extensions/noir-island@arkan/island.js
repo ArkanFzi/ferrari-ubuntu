@@ -70,7 +70,7 @@ const PILL_H = 34;
 const MEDIA_W = 580;
 const MEDIA_H = 104;
 const DASH_H = 64;
-const NOTIF_W = 460;
+const NOTIF_W = MEDIA_W;
 const NOTIF_H = 72;
 // Band tempat rel progres hidup: 12 px untuk pointer, 3 px untuk mata. Bar
 // dipajang di dasar band supaya siluet card tidak berubah dari sebelumnya.
@@ -118,7 +118,7 @@ const OPT = {
 const HOVER_POLL_MS = 120;
 // Dead band antara masuk dan keluar: tanpa itu pill yang persis seukuran
 // region masuk akan nyala-mati tiap frame saat pointer berdiri di ambangnya.
-// Zona masuk harus menutupi card TERLEBAR (NOTIF_W 460 -> setengahnya 230) dan
+// Zona masuk harus menutupi card (250 px dari sumbu) dan
 // card tertinggi (72 px di bawah panel): yang dicari pointer adalah bentuk yang
 // baru saja dilihatnya, bukan pill yang tersisa di dalam panel.
 const HOVER_IN_Y = 100;
@@ -152,7 +152,7 @@ const BODY_MAX = 160;
 // "Show in Files"), dibatasi dua supaya baris tombol tidak menggeser kolom
 // teks, dan labelnya dipotong pada 18 karakter.
 const ACT_MAX = 2;
-const ACT_LABEL_MAX = 18;
+const ACT_LABEL_MAX = 16;
 const SCAN_TICKS = 4;
 // Agenda dihitung ulang per menit, bukan per tick. Angka HH:MM di label tidak
 // berganti sampai jam melewatinya, jadi satu menit cukup untuk memindahkan
@@ -878,6 +878,7 @@ export class Island {
       y_align: Clutter.ActorAlign.CENTER,
     });
     const ncol = new St.BoxLayout({
+      style_class: 'noir-island-notif-col',
       vertical: true,
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
@@ -3084,10 +3085,12 @@ export class Island {
     else
       this._fillPill(player, content, jam, badge);
 
-    // Morph hanya kalau bentuk benar-benar berganti (atau island baru bangun).
+    // Morph jika bentuk berganti, island baru bangun, atau ukuran belum sinkron target.
     // Ganti trek di dalam level yang sama menurunkan opacity/isi, bukan ukuran.
+    const targetW = this._capFor(level, content);
+    const targetH = this._heightFor(level, content);
     const bentuk = `${level}|${content}`;
-    if (bentuk !== this._shape || this._stowed)
+    if (bentuk !== this._shape || this._stowed || (!this._bloomTimerId && (this._island.width !== targetW || this._island.height !== targetH)))
       this._animateTo(level, content);
     const asal = content === 'media' ? player.identity
       : content === 'notif' ? String(this._showing?.src?.title ?? '?') : '';
