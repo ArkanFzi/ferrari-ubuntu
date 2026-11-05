@@ -1,13 +1,16 @@
-# ferrari-ubuntu
+# ferrari-ubuntu & Noir Island
 
-Racikan UI Ubuntu 24.04 (GNOME 46) bergaya macOS-minimalis dengan signatur
-Ferrari: panel gelap ramping, dock full-height di kiri, aksen Rosso Corsa,
-tipografi Titillium/Inter, cluster rev-light di panel atas, team radio saat
-baterai berubah, jam ambient noir, start-light gantry saat login, plus tema
-layar login (GDM) dan splash Plymouth.
+[![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04%20LTS-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
+[![Windows 11](https://img.shields.io/badge/Windows-11%20Ready-0078D4?logo=windows11&logoColor=white)](windows/)
+[![Tauri v2](https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri&logoColor=white)](https://v2.tauri.app/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript&logoColor=white)](windows/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-CSS%20v4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 
-Repo ini berisi **kode dan aset buatan sendiri** serta langkah memasang
-dependensi pihak ketiga. Bukan fork besar tema ikon/GTK.
+Racikan UI bergaya macOS-minimalis dengan signatur Ferrari untuk **Ubuntu 24.04 (GNOME 46)** dan **Windows 11**:
+- **Ubuntu**: Panel gelap ramping, dock full-height di kiri, aksen Rosso Corsa, tipografi Titillium/Inter, cluster rev-light, team radio saat baterai berubah, tema GDM, dan splash Plymouth.
+- **Windows 11**: **Noir Dynamic Island** versi desktop mandiri (*standalone app*) berbasis **Tauri v2 + React + TypeScript**, menghadirkan floating notch di bezel atas dengan integrasi Windows Media (SMTC), lirik tersinkronisasi, dan F1 telemetry cockpit.
+
+Repo ini berisi **kode dan aset buatan sendiri** serta langkah instalasi untuk kedua platform.
 
 ## Tampilan
 
@@ -29,19 +32,20 @@ bersih dari tangkapan layar. Nama jaringan Wi-Fi/VPN dan isi riwayat pada rail d
 ferrari-ubuntu/
 ├── README.md                  dokumen ini
 ├── LICENSE  NOTICE            lisensi karya sendiri + kredit pihak ketiga
-├── extensions/                noir-cluster, noir-rail, noir-clock, noir-startlights,
-│                              noir-telemetry, noir-island
-├── assets/
-│   ├── wallpapers/            hasil render sendiri + XML dinamis 3 fasa
-│   ├── sounds/                panggilan radio (.oga) + gen-radio.py
-│   ├── plymouth/noir-rosso/   splash boot noir
-│   └── gdm/                   gresource tema layar login + CSS tambahan
-├── theme/overrides/           gnome-shell.css WhiteSur yang sudah ditambahi rosso
-├── settings/                  noir.dconf + terminal-profile.dconf
-├── scripts/                   install, apply-settings, fetch-deps, install-system,
-│                              revert, sanitize-check, refresh-settings
-└── docs/                      design-notes, troubleshooting, publication-checklist,
-                               gambar/ (screenshot 1920x1080 dari rig)
+├── .github/workflows/         CI/CD: linux-ci.yml & windows-release.yml (MSI/EXE)
+│
+├── extensions/                [Linux GNOME 46] noir-cluster, noir-rail, noir-clock,
+│                              noir-startlights, noir-telemetry, noir-island
+├── assets/                    [Shared] Wallpapers, suara radio (.oga), plymouth, gdm
+├── theme/overrides/           [Linux] gnome-shell.css WhiteSur dengan aksen rosso
+├── settings/                  [Linux] noir.dconf + terminal-profile.dconf
+├── scripts/                   [Linux] install, apply-settings, fetch-deps, revert
+├── docs/                      [Shared] design-notes, troubleshooting, screenshot rig
+│
+└── windows/                   [Windows 11] Standalone Noir Island App (Tauri v2)
+    ├── src/                   UI Layer (React 19 + TypeScript + Tailwind CSS v4)
+    ├── src-tauri/             Native Backend (Rust + WinRT SMTC + WASAPI + Win32)
+    └── package.json           Konfigurasi Vite & Tauri CLI
 ```
 
 ## Prasyarat
@@ -187,6 +191,51 @@ wpctl status | grep -A2 canberra                    # stream [active]
   diganti versi noir di folder sound user.
 - **Login & boot**: gantry start-light lima lampu saat masuk, layar login dan
   splash Plymouth bernuansa noir.
+
+## 🪟 Noir Island untuk Windows 11 (Tauri v2)
+
+Dynamic Island bertema Ferrari Noir kini hadir sebagai aplikasi desktop mandiri (*standalone desktop app*) untuk Windows 11.
+
+### Fitur Utama Windows:
+1. **Dynamic Floating Notch**: Menempel halus di tengah atas monitor utama (`Z-order: Always on Top`), bebas border, transparan gelap (`#0A0A0C` blur), dan tidak mencuri fokus keyboard (`WS_EX_NOACTIVATE`).
+2. **Windows Media Session (SMTC)**: Otomatis tersinkronisasi dengan Spotify, YouTube Music Desktop, Apple Music, Chrome, Edge, dll. Menampilkan cover art, judul lagu, seekbar interaktif, dan kontrol navigasi.
+3. **Synchronized LRC Lyrics**: Membaca lirik lagu real-time dari LRCLIB API dengan highlight baris aktif dan auto-scroll.
+4. **F1 Cockpit Aesthetics**:
+   - **Rev-Lights Bar**: 15 LED indikator (5 Hijau, 5 Merah Rosso Corsa, 5 Biru Shift Point) yang berdenyut dinamis mengikuti musik atau RPM.
+   - **4-Tire Thermal Heatmap**: Visualisasi suhu ban F1 (FL, FR, RL, RR) dengan indikator warna termal.
+   - **Hardware Telemetry**: Pemantau beban CPU, suhu prosesor, pemakaian RAM, dan persentase baterai laptop.
+5. **Auto-Hide saat Fullscreen**: Otomatis bersembunyi saat Anda menonton video layar penuh atau bermain game agar tidak menghalangi HUD.
+
+### Cara Menjalankan & Memasang di Windows:
+
+#### Opsi 1: Unduh Installer Resmi (.exe / .msi)
+Unduh file installer installer terbaru dari halaman **[Releases](https://github.com/ArkanFzi/ferrari-ubuntu/releases)**:
+- `Noir-Island_x64_en-US.msi` (Windows Installer)
+- `Noir-Island_x64-setup.exe` (Portable / Standalone Installer)
+
+#### Opsi 2: Menjalankan dari Kode Sumber (Development Mode)
+Pastikan Anda telah memasang **Node.js (>= 20)**, **pnpm**, dan **Rust**:
+
+```powershell
+# 1. Pindah ke direktori windows
+cd windows
+
+# 2. Pasang dependensi frontend
+pnpm install
+
+# 3. Jalankan server preview web
+pnpm dev
+
+# 4. Atau jalankan aplikasi desktop Tauri secara langsung
+pnpm tauri dev
+```
+
+#### Opsi 3: Build Installer Sendiri
+```powershell
+cd windows
+pnpm tauri build
+```
+File installer `.msi` dan `.exe` akan otomatis dibuat di dalam folder `windows/src-tauri/target/release/bundle/`.
 
 ## Kustomisasi
 

@@ -5,3 +5,13 @@ backup/
 .DS_Store
 __pycache__/
 *.pyc
+
+# Windows Tauri & Frontend Builds
+windows/node_modules/
+windows/dist/
+windows/src-tauri/target/
+node_modules/
+dist/
+target/
+.pnpm-store/
+*.log
